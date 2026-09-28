@@ -330,7 +330,7 @@
                 }
 
                 if (msg.type === 'transcript') {
-                    showTranscript(msg.text, msg.isFinal);
+                    showTranscript(msg.finalText, msg.interimText);
                     liveBadge.classList.add('visible');
                     clearTimeout(liveBadge._timer);
                     liveBadge._timer = setTimeout(() => liveBadge.classList.remove('visible'), 3000);
@@ -348,48 +348,39 @@
         }
 
         // ── Display ──────────────────────────────────────────────────────────────
-        function showTranscript(fullText, isFinal) {
-            if (!hasContent) {
+        function showTranscript(finalText, interimText) {
+            if (!hasContent && (finalText || interimText)) {
                 emptyState.classList.add('hidden');
                 transcriptText.classList.add('visible');
                 hasContent = true;
             }
 
-            if (isFinal) {
-                finalTextStore = fullText;
-                renderFinalWords(fullText);
-                interimPart.textContent = '';
-            } else {
-                // Separar la parte final de la interim dentro del texto completo
-                renderFinalWords(finalTextStore);
-                const interimOnly = fullText.slice(finalTextStore.length).trim();
-                interimPart.textContent = interimOnly ? ' ' + interimOnly : '';
-            }
+            renderFinalWords(finalText);
+            interimPart.textContent = interimText ? ' ' + interimText : '';
         }
 
         function renderFinalWords(text) {
-            // Animar nuevas palabras con fade-in
-            const words = text.trim().split(/\s+/).filter(Boolean);
+            const words = text ? text.trim().split(/\s+/).filter(Boolean) : [];
             const current = finalPart.querySelectorAll('.word');
             const currentCount = current.length;
 
-            if (words.length <= currentCount) {
-                // Reemplazar todo (por ejemplo, después de un clear previo)
+            if (words.length < currentCount || currentCount === 0) {
                 finalPart.innerHTML = words.map(w => `<span class="word">${w}</span>`).join(' ');
                 return;
             }
 
-            // Agregar solo palabras nuevas
-            const newWords = words.slice(currentCount);
-            newWords.forEach(w => {
-                const span = document.createElement('span');
-                span.className = 'word';
-                span.textContent = w;
-                if (finalPart.childNodes.length > 0) {
-                    finalPart.appendChild(document.createTextNode(' '));
-                }
-                finalPart.appendChild(span);
-            });
+            if (words.length > currentCount) {
+                const newWords = words.slice(currentCount);
+                newWords.forEach(w => {
+                    const span = document.createElement('span');
+                    span.className = 'word';
+                    span.textContent = w;
+                    if (finalPart.childNodes.length > 0) {
+                        finalPart.appendChild(document.createTextNode(' '));
+                    }
+                    finalPart.appendChild(span);
+                });
+            }
         }
 
         function clearDisplay() {

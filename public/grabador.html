@@ -371,8 +371,8 @@
         let ws = null;
         let recognition = null;
         let isRecording = false;
-        let finalText = '';
-        let interimText = '';
+        let sessionFinalText = '';
+        let accumulatedText = '';
 
         // ── DOM ──────────────────────────────────────────────────────────────────
         const recordBtn = document.getElementById('recordBtn');
@@ -404,9 +404,13 @@
             ws.onerror = () => setStatus('disconnected', 'Error de conexión');
         }
 
-        function sendTranscript(text, isFinal) {
+        function sendTranscript(finalText, interimText) {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'transcript', text, isFinal }));
+                ws.send(JSON.stringify({
+                    type: 'transcript',
+                    finalText: finalText ? finalText.trim() : '',
+                    interimText: interimText ? interimText.trim() : ''
+                }));
             }
         }
 
@@ -414,19 +418,6 @@
         function setStatus(state, text) {
             statusBar.className = 'status-bar ' + (state === 'connected' ? 'connected' : state === 'recording' ? 'recording' : '');
             statusText.textContent = text;
-        }
-
-        // ── Preview ──────────────────────────────────────────────────────────────
-        function updatePreview() {
-            if (!finalText && !interimText) {
-                previewText.className = 'empty';
-                previewText.innerHTML = 'Presioná el botón para empezar a grabar';
-            } else {
-                previewText.className = '';
-                previewText.innerHTML =
-                    (finalText ? finalText + ' ' : '') +
-                    (interimText ? `<span class="interim">${interimText}</span>` : '');
-            }
         }
 
         // ── Speech Recognition ───────────────────────────────────────────────────
@@ -444,22 +435,36 @@
             recognition.maxAlternatives = 1;
 
             recognition.onresult = (e) => {
-                interimText = '';
-                for (let i = e.resultIndex; i < e.results.length; i++) {
-                    const t = e.results[i][0].transcript;
+                let currentFinal = '';
+                let currentInterim = '';
+
+                for (let i = 0; i < e.results.length; i++) {
+                    const transcript = e.results[i][0].transcript;
                     if (e.results[i].isFinal) {
-                        finalText += t + ' ';
-                        sendTranscript(finalText.trim(), true);
+                        currentFinal += transcript + ' ';
                     } else {
-                        interimText += t;
-                        sendTranscript((finalText + interimText).trim(), false);
+                        currentInterim += transcript;
                     }
                 }
-                updatePreview();
+
+                sessionFinalText = currentFinal;
+                const totalFinal = (accumulatedText + ' ' + sessionFinalText).trim();
+
+                sendTranscript(totalFinal, currentInterim);
+
+                // Update preview in grabador
+                if (!totalFinal && !currentInterim) {
+                    previewText.className = 'empty';
+                    previewText.innerHTML = 'Presioná el botón para empezar a grabar';
+                } else {
+                    previewText.className = '';
+                    previewText.innerHTML = (totalFinal ? totalFinal + ' ' : '') +
+                        (currentInterim ? `<span class="interim">${currentInterim}</span>` : '');
+                }
             };
 
             recognition.onerror = (e) => {
-                if (e.error === 'no-speech') return; // ignorar silencio
+                if (e.error === 'no-speech') return;
                 if (e.error === 'not-allowed') {
                     showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
                     stopRecording();
@@ -469,7 +474,8 @@
             };
 
             recognition.onend = () => {
-                // Reiniciar automáticamente si seguimos grabando
+                accumulatedText = (accumulatedText + ' ' + sessionFinalText).trim();
+                sessionFinalText = '';
                 if (isRecording) {
                     try { recognition.start(); } catch { }
                 }
@@ -515,9 +521,10 @@
         });
 
         clearBtn.addEventListener('click', () => {
-            finalText = '';
-            interimText = '';
-            updatePreview();
+            accumulatedText = '';
+            sessionFinalText = '';
+            previewText.className = 'empty';
+            previewText.innerHTML = 'Presioná el botón para empezar a grabar';
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'clear' }));
             }

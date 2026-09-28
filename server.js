@@ -182,7 +182,12 @@ server.on('upgrade', (req, socket) => {
 
         if (role === 'grabador') {
             if (msg.type === 'transcript') {
-                broadcast(displays, { type: 'transcript', text: msg.text, isFinal: msg.isFinal, timestamp: Date.now() });
+                broadcast(displays, {
+                    type: 'transcript',
+                    finalText: msg.finalText || '',
+                    interimText: msg.interimText || '',
+                    timestamp: Date.now()
+                });
             }
             if (msg.type === 'clear') {
                 broadcast(displays, { type: 'clear' });
