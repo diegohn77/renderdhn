@@ -374,6 +374,7 @@
         let audioStream = null;
         let isRecording = false;
         let finalTextStore = '';
+        let lastSentFinal = '';   // dedup guard
 
         const DEEPGRAM_KEY = 'ff61b317da3b203ed27fe425774be623c2c103df';
         const LANG_MAP = { 'es-AR': 'es', 'es-ES': 'es', 'en-US': 'en-US', 'pt-BR': 'pt-BR' };
@@ -435,7 +436,15 @@
         function connectDeepgram(lang) {
             return new Promise((resolve, reject) => {
                 const dgLang = LANG_MAP[lang] || 'es';
-                const url = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${dgLang}&interim_results=true&punctuate=true&encoding=opus&sample_rate=48000&channels=1`;
+                // No encoding/sample_rate params: those are for raw PCM only.
+                // For WebM/Opus container from MediaRecorder, Deepgram auto-detects.
+                const url = `wss://api.deepgram.com/v1/listen` +
+                    `?model=nova-2` +
+                    `&language=${dgLang}` +
+                    `&interim_results=true` +
+                    `&punctuate=true` +
+                    `&smart_format=true` +
+                    `&utterance_end_ms=1500`;
                 const dg = new WebSocket(url, ['token', DEEPGRAM_KEY]);
                 dg.binaryType = 'arraybuffer';
                 dg.onopen = () => resolve(dg);
@@ -447,10 +456,14 @@
                         const transcript = (data.channel?.alternatives?.[0]?.transcript || '').trim();
                         if (!transcript) return;
                         if (data.is_final) {
+                            // Dedup: Deepgram can fire is_final multiple times for the same phrase
+                            if (transcript === lastSentFinal) return;
+                            lastSentFinal = transcript;
                             finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
                             relayTranscript(finalTextStore, '');
                             updatePreview('');
                         } else {
+                            lastSentFinal = ''; // reset dedup on new interim
                             relayTranscript(finalTextStore, transcript);
                             updatePreview(transcript);
                         }

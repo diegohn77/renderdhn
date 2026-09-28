@@ -349,38 +349,18 @@
 
         // ── Display ──────────────────────────────────────────────────────────────
         function showTranscript(finalText, interimText) {
-            if (!hasContent && (finalText || interimText)) {
+            const hasFinal = finalText && finalText.trim();
+            const hasInterim = interimText && interimText.trim();
+
+            if (!hasContent && (hasFinal || hasInterim)) {
                 emptyState.classList.add('hidden');
                 transcriptText.classList.add('visible');
                 hasContent = true;
             }
 
-            renderFinalWords(finalText);
-            interimPart.textContent = interimText ? ' ' + interimText : '';
-        }
-
-        function renderFinalWords(text) {
-            const words = text ? text.trim().split(/\s+/).filter(Boolean) : [];
-            const current = finalPart.querySelectorAll('.word');
-            const currentCount = current.length;
-
-            if (words.length < currentCount || currentCount === 0) {
-                finalPart.innerHTML = words.map(w => `<span class="word">${w}</span>`).join(' ');
-                return;
-            }
-
-            if (words.length > currentCount) {
-                const newWords = words.slice(currentCount);
-                newWords.forEach(w => {
-                    const span = document.createElement('span');
-                    span.className = 'word';
-                    span.textContent = w;
-                    if (finalPart.childNodes.length > 0) {
-                        finalPart.appendChild(document.createTextNode(' '));
-                    }
-                    finalPart.appendChild(span);
-                });
-            }
+            // Always fully replace — no incremental logic that can duplicate
+            finalPart.textContent = hasFinal ? finalText.trim() : '';
+            interimPart.textContent = hasInterim ? ' ' + interimText.trim() : '';
         }
 
         function clearDisplay() {
