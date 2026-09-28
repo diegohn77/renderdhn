@@ -374,6 +374,7 @@
         let audioStream = null;
         let isRecording = false;
         let finalTextStore = '';
+        let currentInterim = '';
         let lastSentFinal = '';   // dedup guard
 
         const DEEPGRAM_KEY = 'ff61b317da3b203ed27fe425774be623c2c103df';
@@ -456,14 +457,15 @@
                         const transcript = (data.channel?.alternatives?.[0]?.transcript || '').trim();
                         if (!transcript) return;
                         if (data.is_final) {
-                            // Dedup: Deepgram can fire is_final multiple times for the same phrase
                             if (transcript === lastSentFinal) return;
                             lastSentFinal = transcript;
                             finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
+                            currentInterim = '';
                             relayTranscript(finalTextStore, '');
                             updatePreview('');
                         } else {
-                            lastSentFinal = ''; // reset dedup on new interim
+                            lastSentFinal = '';
+                            currentInterim = transcript;
                             relayTranscript(finalTextStore, transcript);
                             updatePreview(transcript);
                         }
@@ -475,6 +477,7 @@
 
         // ── Recording ────────────────────────────────────────────────────────────
         async function startRecording() {
+            currentInterim = '';
             try {
                 audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             } catch {
@@ -508,6 +511,15 @@
 
         async function stopRecording() {
             isRecording = false;
+
+            // Commit any uncommitted interim text so it is never lost on stop
+            if (currentInterim) {
+                finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + currentInterim;
+                currentInterim = '';
+                relayTranscript(finalTextStore, '');
+                updatePreview('');
+            }
+
             if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
             mediaRecorder = null;
             if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }

@@ -349,18 +349,22 @@
 
         // ── Display ──────────────────────────────────────────────────────────────
         function showTranscript(finalText, interimText) {
-            const hasFinal = finalText && finalText.trim();
-            const hasInterim = interimText && interimText.trim();
+            const f = (finalText || '').trim();
+            const i = (interimText || '').trim();
 
-            if (!hasContent && (hasFinal || hasInterim)) {
+            if (!f && !i) {
+                if (hasContent) clearDisplay();
+                return;
+            }
+
+            if (!hasContent) {
                 emptyState.classList.add('hidden');
                 transcriptText.classList.add('visible');
                 hasContent = true;
             }
 
-            // Always fully replace — no incremental logic that can duplicate
-            finalPart.textContent = hasFinal ? finalText.trim() : '';
-            interimPart.textContent = hasInterim ? ' ' + interimText.trim() : '';
+            finalPart.textContent = f;
+            interimPart.textContent = i ? (f ? ' ' : '') + i : '';
         }
 
         function clearDisplay() {
