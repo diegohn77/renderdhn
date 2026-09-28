@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ConversacionIA — Panel de Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <!-- QRCode.js desde CDN (sin npm) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0a0a0f;
+            --surface: #111118;
+            --surface2: #1a1a26;
+            --accent: #6c63ff;
+            --accent2: #a78bfa;
+            --green: #10b981;
+            --text: #f0f0ff;
+            --muted: #6b6b8a;
+            --border: rgba(108, 99, 255, 0.2);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            background-image:
+                radial-gradient(ellipse 80% 60% at 50% -20%, rgba(108, 99, 255, 0.15) 0%, transparent 70%),
+                radial-gradient(ellipse 60% 40% at 80% 80%, rgba(167, 139, 250, 0.08) 0%, transparent 60%);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        header .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(108, 99, 255, 0.15);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            padding: 0.35rem 1rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent2);
+            margin-bottom: 1rem;
+        }
+
+        header h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        header p {
+            margin-top: 0.75rem;
+            color: var(--muted);
+            font-size: 1rem;
+            max-width: 500px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 900px;
+        }
+
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            transition: border-color 0.3s, transform 0.3s;
+        }
+
+        .card:hover {
+            border-color: var(--accent);
+            transform: translateY(-3px);
+        }
+
+        .card.qr-card {
+            grid-column: 1 / -1;
+        }
+
+        .card-icon {
+            font-size: 2.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .card p {
+            color: var(--muted);
+            font-size: 0.875rem;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .qr-wrapper {
+            background: #fff;
+            border-radius: 16px;
+            padding: 16px;
+            display: inline-block;
+            box-shadow: 0 0 40px rgba(108, 99, 255, 0.3);
+        }
+
+        #qr-container canvas,
+        #qr-container img {
+            display: block;
+        }
+
+        .url-display {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.6rem 1.2rem;
+            font-size: 0.8rem;
+            color: var(--accent2);
+            word-break: break-all;
+            text-align: center;
+            max-width: 440px;
+            letter-spacing: 0.02em;
+            user-select: all;
+            cursor: pointer;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.75rem;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(108, 99, 255, 0.35);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(108, 99, 255, 0.5);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--accent2);
+            border: 1px solid var(--border);
+        }
+
+        .btn-outline:hover {
+            background: rgba(108, 99, 255, 0.1);
+            border-color: var(--accent);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 8px var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        footer {
+            margin-top: 3rem;
+            color: var(--muted);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="badge">
+            <span class="status-dot"></span>
+            Sistema activo
+        </div>
+        <h1>ConversacionIA</h1>
+        <p>Transcripción de audio en tiempo real desde cualquier celular</p>
+    </header>
+
+    <div class="grid">
+        <!-- QR Card -->
+        <div class="card qr-card">
+            <div class="card-icon">📱</div>
+            <h2>Escanear para grabar</h2>
+            <p>El celular y esta computadora deben estar en la misma red Wi-Fi. Usá <strong>Chrome en Android</strong>.
+            </p>
+            <div class="qr-wrapper">
+                <div id="qr-container"></div>
+            </div>
+            <div class="url-display" id="grabador-url" title="Clic para copiar">Cargando URL…</div>
+        </div>
+
+        <!-- Display card -->
+        <div class="card">
+            <div class="card-icon">🖥️</div>
+            <h2>Pantalla de Display</h2>
+            <p>Abrí esta página en la pantalla donde querés ver la transcripción en tiempo real.</p>
+            <a href="/display.html" target="_blank" class="btn btn-primary">Abrir Display →</a>
+        </div>
+
+        <!-- Grabador card -->
+        <div class="card">
+            <div class="card-icon">🎙️</div>
+            <h2>Grabador (móvil)</h2>
+            <p>Podés abrir esta página directamente en el celular si preferís no usar el QR.</p>
+            <a href="/grabador.html" target="_blank" class="btn btn-outline">Abrir Grabador</a>
+        </div>
+    </div>
+
+    <footer>ConversacionIA · Chrome en Android para mejor compatibilidad</footer>
+
+    <script>
+        fetch('/api/info')
+            .then(r => r.json())
+            .then(data => {
+                const url = data.grabadorUrl;
+                const urlEl = document.getElementById('grabador-url');
+                urlEl.textContent = url;
+                urlEl.addEventListener('click', () => {
+                    navigator.clipboard.writeText(url).catch(() => { });
+                });
+
+                // Generar QR en el cliente
+                new QRCode(document.getElementById('qr-container'), {
+                    text: url,
+                    width: 240,
+                    height: 240,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            });
+    </script>
+</body>
+
+</html>

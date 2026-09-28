@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>ConversacionIA — Grabador</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #070710;
+            --surface: #0f0f1e;
+            --accent: #6c63ff;
+            --accent2: #a78bfa;
+            --red: #ef4444;
+            --green: #10b981;
+            --text: #f0f0ff;
+            --muted: #5a5a7a;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2rem 1.5rem;
+            overflow: hidden;
+            background-image: radial-gradient(ellipse 100% 70% at 50% 0%, rgba(108, 99, 255, 0.12) 0%, transparent 70%);
+        }
+
+        /* ── Header ─────────────────────────── */
+        .header {
+            text-align: center;
+            width: 100%;
+        }
+
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff, var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header .subtitle {
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-top: 0.25rem;
+        }
+
+        /* ── Status bar ─────────────────────── */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 100px;
+            padding: 0.4rem 1rem;
+            font-size: 0.75rem;
+            color: var(--muted);
+            transition: all 0.3s;
+        }
+
+        .status-bar .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: background 0.3s;
+        }
+
+        .status-bar.connected .dot {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green);
+        }
+
+        .status-bar.recording .dot {
+            background: var(--red);
+            box-shadow: 0 0 6px var(--red);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* ── Preview text ───────────────────── */
+        .preview-area {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem 0;
+        }
+
+        .preview-box {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(108, 99, 255, 0.2);
+            border-radius: 20px;
+            padding: 1.5rem;
+            width: 100%;
+            max-height: 240px;
+            overflow-y: auto;
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .preview-box p {
+            font-size: 1.1rem;
+            line-height: 1.7;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .preview-box p .interim {
+            color: var(--accent2);
+            font-style: italic;
+        }
+
+        .preview-box p.empty {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        /* ── Waveform ───────────────────────── */
+        .waveform {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 50px;
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+
+        .waveform.active {
+            opacity: 1;
+        }
+
+        .waveform .bar {
+            width: 4px;
+            background: linear-gradient(180deg, var(--accent2), var(--accent));
+            border-radius: 2px;
+            animation: wave 1.2s ease-in-out infinite;
+        }
+
+        .waveform .bar:nth-child(1) {
+            animation-delay: 0s;
+            height: 8px;
+        }
+
+        .waveform .bar:nth-child(2) {
+            animation-delay: 0.1s;
+            height: 16px;
+        }
+
+        .waveform .bar:nth-child(3) {
+            animation-delay: 0.2s;
+            height: 28px;
+        }
+
+        .waveform .bar:nth-child(4) {
+            animation-delay: 0.3s;
+            height: 40px;
+        }
+
+        .waveform .bar:nth-child(5) {
+            animation-delay: 0.2s;
+            height: 28px;
+        }
+
+        .waveform .bar:nth-child(6) {
+            animation-delay: 0.1s;
+            height: 16px;
+        }
+
+        .waveform .bar:nth-child(7) {
+            animation-delay: 0s;
+            height: 8px;
+        }
+
+        @keyframes wave {
+
+            0%,
+            100% {
+                transform: scaleY(1);
+            }
+
+            50% {
+                transform: scaleY(2.2);
+            }
+        }
+
+        /* ── Controls ───────────────────────── */
+        .controls {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.2rem;
+        }
+
+        .record-btn {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.2rem;
+            transition: all 0.25s;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 8px 32px rgba(108, 99, 255, 0.5);
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .record-btn:active {
+            transform: scale(0.92);
+        }
+
+        .record-btn.recording {
+            background: linear-gradient(135deg, #ef4444, #f97316);
+            box-shadow: 0 8px 32px rgba(239, 68, 68, 0.5);
+            animation: glow 2s infinite;
+        }
+
+        @keyframes glow {
+
+            0%,
+            100% {
+                box-shadow: 0 8px 32px rgba(239, 68, 68, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 8px 50px rgba(239, 68, 68, 0.8);
+            }
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .btn-sm {
+            padding: 0.55rem 1.2rem;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .btn-sm:active,
+        .btn-sm:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+        }
+
+        /* ── Lang selector ──────────────────── */
+        .lang-select {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            appearance: none;
+            cursor: pointer;
+        }
+
+        .lang-select option {
+            background: #111;
+        }
+
+        /* ── Error ──────────────────────────── */
+        .error-msg {
+            display: none;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+            font-size: 0.85rem;
+            color: #fca5a5;
+            text-align: center;
+            width: 100%;
+        }
+
+        .error-msg.visible {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>🎙️ ConversacionIA</h1>
+        <p class="subtitle">Grabador de voz en tiempo real</p>
+    </div>
+
+    <div class="status-bar" id="statusBar">
+        <div class="dot"></div>
+        <span id="statusText">Conectando…</span>
+    </div>
+
+    <div class="preview-area">
+        <div class="preview-box">
+            <p class="empty" id="previewText">Presioná el botón para empezar a grabar</p>
+        </div>
+    </div>
+
+    <div class="waveform" id="waveform">
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+
+    <div class="controls">
+        <button class="record-btn" id="recordBtn" title="Grabar" disabled>🎤</button>
+        <div class="btn-row">
+            <select class="lang-select" id="langSelect" title="Idioma">
+                <option value="es-AR">🇦🇷 Español (AR)</option>
+                <option value="es-ES">🇪🇸 Español (ES)</option>
+                <option value="en-US">🇺🇸 English</option>
+                <option value="pt-BR">🇧🇷 Português</option>
+            </select>
+            <button class="btn-sm" id="clearBtn">🗑 Limpiar</button>
+        </div>
+    </div>
+
+    <script>
+        // ── State ────────────────────────────────────────────────────────────────
+        let ws = null;
+        let recognition = null;
+        let isRecording = false;
+        let finalText = '';
+        let interimText = '';
+
+        // ── DOM ──────────────────────────────────────────────────────────────────
+        const recordBtn = document.getElementById('recordBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const statusBar = document.getElementById('statusBar');
+        const statusText = document.getElementById('statusText');
+        const previewText = document.getElementById('previewText');
+        const waveform = document.getElementById('waveform');
+        const errorMsg = document.getElementById('errorMsg');
+        const langSelect = document.getElementById('langSelect');
+
+        // ── WebSocket ────────────────────────────────────────────────────────────
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            ws = new WebSocket(`${proto}://${location.host}`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ role: 'grabador' }));
+                setStatus('connected', 'Conectado al servidor');
+                recordBtn.disabled = false;
+            };
+
+            ws.onclose = () => {
+                setStatus('disconnected', 'Desconectado — reconectando…');
+                recordBtn.disabled = true;
+                setTimeout(connectWS, 3000);
+            };
+
+            ws.onerror = () => setStatus('disconnected', 'Error de conexión');
+        }
+
+        function sendTranscript(text, isFinal) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'transcript', text, isFinal }));
+            }
+        }
+
+        // ── Status helper ────────────────────────────────────────────────────────
+        function setStatus(state, text) {
+            statusBar.className = 'status-bar ' + (state === 'connected' ? 'connected' : state === 'recording' ? 'recording' : '');
+            statusText.textContent = text;
+        }
+
+        // ── Preview ──────────────────────────────────────────────────────────────
+        function updatePreview() {
+            if (!finalText && !interimText) {
+                previewText.className = 'empty';
+                previewText.innerHTML = 'Presioná el botón para empezar a grabar';
+            } else {
+                previewText.className = '';
+                previewText.innerHTML =
+                    (finalText ? finalText + ' ' : '') +
+                    (interimText ? `<span class="interim">${interimText}</span>` : '');
+            }
+        }
+
+        // ── Speech Recognition ───────────────────────────────────────────────────
+        function setupRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                showError('Tu navegador no soporta reconocimiento de voz. Usá Chrome en Android.');
+                return false;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = langSelect.value;
+            recognition.maxAlternatives = 1;
+
+            recognition.onresult = (e) => {
+                interimText = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    const t = e.results[i][0].transcript;
+                    if (e.results[i].isFinal) {
+                        finalText += t + ' ';
+                        sendTranscript(finalText.trim(), true);
+                    } else {
+                        interimText += t;
+                        sendTranscript((finalText + interimText).trim(), false);
+                    }
+                }
+                updatePreview();
+            };
+
+            recognition.onerror = (e) => {
+                if (e.error === 'no-speech') return; // ignorar silencio
+                if (e.error === 'not-allowed') {
+                    showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
+                    stopRecording();
+                    return;
+                }
+                console.warn('SpeechRecognition error:', e.error);
+            };
+
+            recognition.onend = () => {
+                // Reiniciar automáticamente si seguimos grabando
+                if (isRecording) {
+                    try { recognition.start(); } catch { }
+                }
+            };
+
+            return true;
+        }
+
+        function startRecording() {
+            recognition.lang = langSelect.value;
+            recognition.start();
+            isRecording = true;
+            recordBtn.classList.add('recording');
+            recordBtn.textContent = '⏹';
+            waveform.classList.add('active');
+            setStatus('recording', 'Grabando…');
+        }
+
+        function stopRecording() {
+            isRecording = false;
+            try { recognition.stop(); } catch { }
+            recordBtn.classList.remove('recording');
+            recordBtn.textContent = '🎤';
+            waveform.classList.remove('active');
+            setStatus('connected', 'Conectado al servidor');
+        }
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.add('visible');
+        }
+
+        // ── Events ───────────────────────────────────────────────────────────────
+        recordBtn.addEventListener('click', () => {
+            if (!recognition) {
+                if (!setupRecognition()) return;
+            }
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            finalText = '';
+            interimText = '';
+            updatePreview();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'clear' }));
+            }
+        });
+
+        langSelect.addEventListener('change', () => {
+            if (isRecording) {
+                stopRecording();
+                setTimeout(startRecording, 300);
+            }
+        });
+
+        // ── Init ─────────────────────────────────────────────────────────────────
+        connectWS();
+    </script>
+</body>
+
+</html>

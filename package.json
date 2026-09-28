@@ -1,0 +1,9 @@
+{
+    "name": "conversacion-ia",
+    "version": "1.0.0",
+    "description": "Sistema de transcripción de audio en tiempo real — sin dependencias externas",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js"
+    }
+}

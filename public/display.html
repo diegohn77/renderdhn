@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ConversacionIA — Display</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #04040c;
+            --accent: #6c63ff;
+            --accent2: #a78bfa;
+            --green: #10b981;
+            --red: #ef4444;
+            --text-final: #ffffff;
+            --text-interim: #a78bfa;
+            --muted: #3a3a5a;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text-final);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background-image:
+                radial-gradient(ellipse 80% 60% at 50% -10%, rgba(108, 99, 255, 0.10) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 40% at 90% 90%, rgba(167, 139, 250, 0.05) 0%, transparent 60%);
+        }
+
+        /* ── Top bar ─────────────────────────── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            flex-shrink: 0;
+        }
+
+        .topbar .logo {
+            font-size: 0.9rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #fff, var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .topbar .indicators {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .indicator .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: all 0.3s;
+        }
+
+        .indicator.ws-ok .dot {
+            background: var(--green);
+            box-shadow: 0 0 6px var(--green);
+        }
+
+        .indicator.grabando .dot {
+            background: var(--red);
+            box-shadow: 0 0 8px var(--red);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* ── Main content ───────────────────── */
+        .stage {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem 6vw;
+            position: relative;
+        }
+
+        .transcript-container {
+            max-width: 900px;
+            width: 100%;
+            text-align: center;
+        }
+
+        /* Empty state */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            opacity: 0.4;
+            transition: opacity 0.5s;
+        }
+
+        .empty-state.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .empty-icon {
+            font-size: 4rem;
+        }
+
+        .empty-state p {
+            font-size: 1.1rem;
+            color: var(--muted);
+        }
+
+        /* Text display */
+        .transcript-text {
+            font-size: clamp(1.6rem, 4vw, 3rem);
+            font-weight: 500;
+            line-height: 1.55;
+            letter-spacing: -0.01em;
+            display: none;
+        }
+
+        .transcript-text.visible {
+            display: block;
+        }
+
+        .transcript-text .final-part {
+            color: var(--text-final);
+        }
+
+        .transcript-text .interim-part {
+            color: var(--text-interim);
+            font-style: italic;
+        }
+
+        /* Word-by-word fade-in animation */
+        .word {
+            display: inline-block;
+            animation: fadeWord 0.3s ease both;
+        }
+
+        @keyframes fadeWord {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Active recording indicator at bottom */
+        .live-badge {
+            position: fixed;
+            bottom: 1.5rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 100px;
+            padding: 0.4rem 1.1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #fca5a5;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+
+        .live-badge.visible {
+            opacity: 1;
+        }
+
+        .live-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: blink 1s infinite;
+        }
+
+        /* Cursor blink when active */
+        .cursor {
+            display: inline-block;
+            width: 3px;
+            height: 1.1em;
+            background: var(--accent2);
+            vertical-align: middle;
+            margin-left: 4px;
+            border-radius: 2px;
+            animation: cursorBlink 1s infinite;
+            opacity: 0;
+        }
+
+        .cursor.visible {
+            opacity: 1;
+        }
+
+        @keyframes cursorBlink {
+
+            0%,
+            49% {
+                opacity: 1;
+            }
+
+            50%,
+            100% {
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="topbar">
+        <div class="logo">⚡ ConversacionIA</div>
+        <div class="indicators">
+            <div class="indicator" id="wsIndicator">
+                <div class="dot"></div>
+                <span id="wsLabel">Conectando…</span>
+            </div>
+            <div class="indicator" id="grabIndicator">
+                <div class="dot"></div>
+                <span id="grabLabel">Sin grabador</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="stage">
+        <div class="transcript-container">
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">🎙️</div>
+                <p>Esperando al grabador…</p>
+            </div>
+
+            <div class="transcript-text" id="transcriptText">
+                <span class="final-part" id="finalPart"></span><span class="interim-part" id="interimPart"></span><span
+                    class="cursor" id="cursor"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="live-badge" id="liveBadge">
+        <div class="dot"></div> En vivo
+    </div>
+
+    <script>
+        // ── DOM ──────────────────────────────────────────────────────────────────
+        const wsIndicator = document.getElementById('wsIndicator');
+        const wsLabel = document.getElementById('wsLabel');
+        const grabIndicator = document.getElementById('grabIndicator');
+        const grabLabel = document.getElementById('grabLabel');
+        const emptyState = document.getElementById('emptyState');
+        const transcriptText = document.getElementById('transcriptText');
+        const finalPart = document.getElementById('finalPart');
+        const interimPart = document.getElementById('interimPart');
+        const cursor = document.getElementById('cursor');
+        const liveBadge = document.getElementById('liveBadge');
+
+        let hasContent = false;
+        let finalTextStore = '';
+
+        // ── WebSocket ────────────────────────────────────────────────────────────
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(`${proto}://${location.host}`);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ role: 'display' }));
+                wsIndicator.className = 'indicator ws-ok';
+                wsLabel.textContent = 'Conectado';
+            };
+
+            ws.onclose = () => {
+                wsIndicator.className = 'indicator';
+                wsLabel.textContent = 'Desconectado';
+                setTimeout(connectWS, 3000);
+            };
+
+            ws.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+
+                if (msg.type === 'status') {
+                    const active = msg.grabadores > 0;
+                    grabIndicator.className = 'indicator' + (active ? ' grabando' : '');
+                    grabLabel.textContent = active ? `Grabando (${msg.grabadores})` : 'Sin grabador';
+                    cursor.className = 'cursor' + (active ? ' visible' : '');
+                }
+
+                if (msg.type === 'transcript') {
+                    showTranscript(msg.text, msg.isFinal);
+                    liveBadge.classList.add('visible');
+                    clearTimeout(liveBadge._timer);
+                    liveBadge._timer = setTimeout(() => liveBadge.classList.remove('visible'), 3000);
+
+                    // Indicador de grabador activo
+                    grabIndicator.className = 'indicator grabando';
+                    grabLabel.textContent = 'Recibiendo…';
+                    cursor.className = 'cursor visible';
+                }
+
+                if (msg.type === 'clear') {
+                    clearDisplay();
+                }
+            };
+        }
+
+        // ── Display ──────────────────────────────────────────────────────────────
+        function showTranscript(fullText, isFinal) {
+            if (!hasContent) {
+                emptyState.classList.add('hidden');
+                transcriptText.classList.add('visible');
+                hasContent = true;
+            }
+
+            if (isFinal) {
+                finalTextStore = fullText;
+                renderFinalWords(fullText);
+                interimPart.textContent = '';
+            } else {
+                // Separar la parte final de la interim dentro del texto completo
+                renderFinalWords(finalTextStore);
+                const interimOnly = fullText.slice(finalTextStore.length).trim();
+                interimPart.textContent = interimOnly ? ' ' + interimOnly : '';
+            }
+        }
+
+        function renderFinalWords(text) {
+            // Animar nuevas palabras con fade-in
+            const words = text.trim().split(/\s+/).filter(Boolean);
+            const current = finalPart.querySelectorAll('.word');
+            const currentCount = current.length;
+
+            if (words.length <= currentCount) {
+                // Reemplazar todo (por ejemplo, después de un clear previo)
+                finalPart.innerHTML = words.map(w => `<span class="word">${w}</span>`).join(' ');
+                return;
+            }
+
+            // Agregar solo palabras nuevas
+            const newWords = words.slice(currentCount);
+            newWords.forEach(w => {
+                const span = document.createElement('span');
+                span.className = 'word';
+                span.textContent = w;
+                if (finalPart.childNodes.length > 0) {
+                    finalPart.appendChild(document.createTextNode(' '));
+                }
+                finalPart.appendChild(span);
+            });
+        }
+
+        function clearDisplay() {
+            finalPart.innerHTML = '';
+            interimPart.textContent = '';
+            finalTextStore = '';
+            hasContent = false;
+            emptyState.classList.remove('hidden');
+            transcriptText.classList.remove('visible');
+            emptyState.querySelector('p').textContent = 'Esperando al grabador…';
+            cursor.className = 'cursor';
+        }
+
+        // ── Init ─────────────────────────────────────────────────────────────────
+        connectWS();
+    </script>
+</body>
+
+</html>
