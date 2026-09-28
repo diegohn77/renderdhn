@@ -134,9 +134,14 @@ function encodeFrame(text) {
     return Buffer.concat([header, payload]);
 }
 
-// Registro de sockets por rol
+// Registro de sockets y estado global de la sala (Idempotencia)
 const grabadores = new Set();
 const displays = new Set();
+let currentRoomState = {
+    finalText: '',
+    interimText: '',
+    timestamp: Date.now()
+};
 
 function broadcast(targets, msgObj) {
     const frame = encodeFrame(JSON.stringify(msgObj));
@@ -173,7 +178,7 @@ server.on('upgrade', (req, socket) => {
         buf = Buffer.concat([buf, chunk]);
         const frame = decodeFrame(buf);
         if (!frame) return;
-        buf = Buffer.alloc(0); // Reset (simple, sin fragmentación)
+        buf = Buffer.alloc(0); // Reset
 
         if (frame.opcode === 0x8) { socket.destroy(); return; }
         if (!frame.text) return;
@@ -197,22 +202,34 @@ server.on('upgrade', (req, socket) => {
                 displays.add(socket);
                 for (const s of [...grabadores]) { if (s.destroyed || !s.writable) grabadores.delete(s); }
                 console.log(`[WS] Display conectado. Total en Set: ${displays.size}`);
-                socket.write(encodeFrame(JSON.stringify({ type: 'status', grabadores: grabadores.size })));
+                // Immediately sync current room state to new display connection
+                socket.write(encodeFrame(JSON.stringify({
+                    type: 'SYNC_STATE',
+                    finalText: currentRoomState.finalText,
+                    interimText: currentRoomState.interimText,
+                    grabadores: grabadores.size
+                })));
             }
             return;
         }
 
         if (role === 'grabador') {
-            if (msg.type === 'transcript') {
-                broadcast(displays, {
-                    type: 'transcript',
+            if (msg.type === 'SYNC_STATE' || msg.type === 'transcript') {
+                currentRoomState = {
                     finalText: msg.finalText || '',
                     interimText: msg.interimText || '',
                     timestamp: Date.now()
+                };
+                broadcast(displays, {
+                    type: 'SYNC_STATE',
+                    finalText: currentRoomState.finalText,
+                    interimText: currentRoomState.interimText,
+                    timestamp: currentRoomState.timestamp
                 });
             }
             if (msg.type === 'clear') {
-                broadcast(displays, { type: 'clear' });
+                currentRoomState = { finalText: '', interimText: '', timestamp: Date.now() };
+                broadcast(displays, { type: 'SYNC_STATE', finalText: '', interimText: '', timestamp: Date.now() });
             }
         }
     });

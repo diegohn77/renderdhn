@@ -369,16 +369,12 @@
     <script>
         // ── State ────────────────────────────────────────────────────────────────
         let ws = null;
-        let dgWs = null;
-        let mediaRecorder = null;
-        let audioStream = null;
+        let recognition = null;
         let isRecording = false;
-        let finalTextStore = '';
+        let finalPhrasesMap = {};
         let currentInterim = '';
-        let lastSentFinal = '';   // dedup guard
 
-        const DEEPGRAM_KEY = 'ff61b317da3b203ed27fe425774be623c2c103df';
-        const LANG_MAP = { 'es-AR': 'es', 'es-ES': 'es', 'en-US': 'en-US', 'pt-BR': 'pt-BR' };
+        const LANG_MAP = { 'es-AR': 'es-AR', 'es-ES': 'es-ES', 'en-US': 'en-US', 'pt-BR': 'pt-BR' };
 
         // ── DOM ──────────────────────────────────────────────────────────────────
         const recordBtn = document.getElementById('recordBtn');
@@ -404,19 +400,23 @@
                 recordBtn.disabled = true;
                 setTimeout(connectServerWS, 3000);
             };
-            ws.onerror = () => setStatus('disconnected', 'Error de conexión');
+            ws.onerror = () => setStatus('disconnected', 'Error de conexión con el servidor');
         }
 
-        function relayTranscript(finalText, interimText) {
+        function sendSyncState(finalText, interimText) {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'transcript', finalText: finalText || '', interimText: interimText || '' }));
+                ws.send(JSON.stringify({
+                    type: 'SYNC_STATE',
+                    finalText: finalText || '',
+                    interimText: interimText || ''
+                }));
             }
         }
 
         // ── Preview ──────────────────────────────────────────────────────────────
-        function updatePreview(interim) {
-            const f = finalTextStore.trim();
-            const i = (interim || '').trim();
+        function updatePreview(finalText, interimText) {
+            const f = (finalText || '').trim();
+            const i = (interimText || '').trim();
             if (!f && !i) {
                 previewText.className = 'empty';
                 previewText.innerHTML = 'Presioná el botón para empezar a grabar';
@@ -433,119 +433,109 @@
 
         function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.add('visible'); }
 
-        // ── Deepgram ─────────────────────────────────────────────────────────────
-        function connectDeepgram(lang) {
-            return new Promise((resolve, reject) => {
-                const dgLang = LANG_MAP[lang] || 'es';
-                // No encoding/sample_rate params: those are for raw PCM only.
-                // For WebM/Opus container from MediaRecorder, Deepgram auto-detects.
-                const url = `wss://api.deepgram.com/v1/listen` +
-                    `?model=nova-2` +
-                    `&language=${dgLang}` +
-                    `&interim_results=true` +
-                    `&punctuate=true` +
-                    `&smart_format=true` +
-                    `&utterance_end_ms=1500`;
-                const dg = new WebSocket(url, ['token', DEEPGRAM_KEY]);
-                dg.binaryType = 'arraybuffer';
-                dg.onopen = () => resolve(dg);
-                dg.onerror = (e) => reject(e);
-                dg.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.type !== 'Results') return;
-                        const transcript = (data.channel?.alternatives?.[0]?.transcript || '').trim();
-                        if (!transcript) return;
-                        if (data.is_final) {
-                            if (transcript === lastSentFinal) return;
-                            lastSentFinal = transcript;
-                            finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
-                            currentInterim = '';
-                            relayTranscript(finalTextStore, '');
-                            updatePreview('');
-                        } else {
-                            lastSentFinal = '';
-                            currentInterim = transcript;
-                            relayTranscript(finalTextStore, transcript);
-                            updatePreview(transcript);
-                        }
-                    } catch { /* ignore */ }
-                };
-                dg.onclose = () => {
-                    console.log('[Deepgram] WebSocket cerrado');
-                };
-            });
-        }
-
-        // ── Recording ────────────────────────────────────────────────────────────
-        async function startRecording() {
-            currentInterim = '';
-            try {
-                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-            } catch {
-                showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
-                return;
+        // ── Recognition (Web Speech API + Idempotent State) ──────────────────────
+        function initRecognition() {
+            const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!Speech) {
+                showError('Tu navegador no soporta el reconocimiento de voz. Usá Google Chrome.');
+                return null;
             }
-            try {
-                dgWs = await connectDeepgram(langSelect.value);
-            } catch {
-                showError('No se pudo conectar a Deepgram. Verificá tu conexión.');
-                audioStream.getTracks().forEach(t => t.stop());
-                audioStream = null;
-                return;
-            }
+            const rec = new Speech();
+            rec.continuous = true;
+            rec.interimResults = true;
+            rec.lang = langSelect.value;
 
-            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-                ? 'audio/webm;codecs=opus'
-                : (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm');
+            rec.onresult = (event) => {
+                currentInterim = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const res = event.results[i];
+                    const transcript = res[0].transcript.trim();
+                    if (res.isFinal) {
+                        finalPhrasesMap[i] = transcript;
+                    } else {
+                        currentInterim = transcript;
+                    }
+                }
 
-            mediaRecorder = new MediaRecorder(audioStream, { mimeType });
-            mediaRecorder.ondataavailable = (e) => {
-                if (dgWs && dgWs.readyState === WebSocket.OPEN && e.data.size > 0) dgWs.send(e.data);
+                // Compute absolute ordered final text from map
+                const absoluteFinalText = Object.keys(finalPhrasesMap)
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map(k => finalPhrasesMap[k])
+                    .filter(Boolean)
+                    .join(' ');
+
+                sendSyncState(absoluteFinalText, currentInterim);
+                updatePreview(absoluteFinalText, currentInterim);
             };
-            mediaRecorder.start(250);
-            isRecording = true;
-            recordBtn.classList.add('recording');
-            recordBtn.textContent = '⏹';
-            waveform.classList.add('active');
-            setStatus('recording', '🎙 Grabando con Deepgram…');
+
+            rec.onerror = (e) => {
+                if (e.error === 'no-speech') return;
+                console.warn('[Speech] Error:', e.error);
+            };
+
+            rec.onend = () => {
+                if (isRecording && recognition) {
+                    try { recognition.start(); } catch { }
+                }
+            };
+
+            return rec;
         }
 
-        async function stopRecording() {
+        // ── Recording Controls ───────────────────────────────────────────────────
+        function startRecording() {
+            if (!recognition) recognition = initRecognition();
+            if (!recognition) return;
+
+            try {
+                recognition.lang = langSelect.value;
+                recognition.start();
+                isRecording = true;
+                recordBtn.classList.add('recording');
+                recordBtn.textContent = '⏹';
+                waveform.classList.add('active');
+                setStatus('recording', '🎙 Grabando… habla en voz alta');
+            } catch (e) {
+                console.warn('[Speech] Error al iniciar:', e);
+            }
+        }
+
+        function stopRecording() {
             isRecording = false;
-            currentInterim = '';
-
-            // Cleanly finish preview without duplicating words
-            relayTranscript(finalTextStore, '');
-            updatePreview('');
-
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-            mediaRecorder = null;
-            if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
-            if (dgWs) {
-                if (dgWs.readyState === WebSocket.OPEN) dgWs.send(JSON.stringify({ type: 'CloseStream' }));
-                dgWs.close();
-                dgWs = null;
+            if (recognition) {
+                try { recognition.stop(); } catch { }
             }
             recordBtn.classList.remove('recording');
             recordBtn.textContent = '🎤';
             waveform.classList.remove('active');
             setStatus('connected', 'Conectado — listo para grabar');
+
+            // Send clean absolute state without interim
+            const absoluteFinalText = Object.keys(finalPhrasesMap)
+                .sort((a, b) => Number(a) - Number(b))
+                .map(k => finalPhrasesMap[k])
+                .filter(Boolean)
+                .join(' ');
+
+            sendSyncState(absoluteFinalText, '');
+            updatePreview(absoluteFinalText, '');
         }
 
         // ── Events ───────────────────────────────────────────────────────────────
-        recordBtn.addEventListener('click', async () => {
-            if (!isRecording) { await startRecording(); } else { await stopRecording(); }
+        recordBtn.addEventListener('click', () => {
+            if (!isRecording) { startRecording(); } else { stopRecording(); }
         });
 
         clearBtn.addEventListener('click', () => {
-            finalTextStore = '';
-            updatePreview('');
+            finalPhrasesMap = {};
+            currentInterim = '';
+            updatePreview('', '');
             if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'clear' }));
         });
 
-        langSelect.addEventListener('change', async () => {
-            if (isRecording) { await stopRecording(); setTimeout(startRecording, 300); }
+        langSelect.addEventListener('change', () => {
+            if (recognition) recognition.lang = langSelect.value;
+            if (isRecording) { stopRecording(); setTimeout(startRecording, 300); }
         });
 
         connectServerWS();
