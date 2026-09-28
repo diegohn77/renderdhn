@@ -140,10 +140,22 @@ const displays = new Set();
 
 function broadcast(targets, msgObj) {
     const frame = encodeFrame(JSON.stringify(msgObj));
-    targets.forEach(sock => {
-        if (!sock.destroyed) sock.write(frame);
-    });
+    // Purge dead sockets first to prevent duplicates
+    for (const sock of [...targets]) {
+        if (sock.destroyed || !sock.writable) { targets.delete(sock); continue; }
+        try { sock.write(frame); } catch { targets.delete(sock); }
+    }
 }
+
+// Ping every 5s to detect and purge dead connections
+setInterval(() => {
+    for (const sock of [...displays]) {
+        if (sock.destroyed || !sock.writable) { displays.delete(sock); }
+    }
+    for (const sock of [...grabadores]) {
+        if (sock.destroyed || !sock.writable) { grabadores.delete(sock); }
+    }
+}, 5000);
 
 server.on('upgrade', (req, socket) => {
     const key = req.headers['sec-websocket-key'];
@@ -175,11 +187,11 @@ server.on('upgrade', (req, socket) => {
             if (role === 'grabador') {
                 grabadores.add(socket);
                 console.log(`[WS] Grabador conectado (${grabadores.size} total)`);
-                // Notificar displays
                 broadcast(displays, { type: 'status', grabadores: grabadores.size });
             } else if (role === 'display') {
+                // IMPORTANT: ensure this socket is not already in the set
                 displays.add(socket);
-                console.log(`[WS] Display conectado (${displays.size} total)`);
+                console.log(`[WS] Display conectado. Total en Set: ${displays.size}`);
                 socket.write(encodeFrame(JSON.stringify({ type: 'status', grabadores: grabadores.size })));
             }
             return;
@@ -207,11 +219,17 @@ server.on('upgrade', (req, socket) => {
             broadcast(displays, { type: 'status', grabadores: grabadores.size });
         } else if (role === 'display') {
             displays.delete(socket);
-            console.log(`[WS] Display desconectado (${displays.size} total)`);
+            console.log(`[WS] Display desconectado. Quedan: ${displays.size}`);
         }
     });
 
-    socket.on('error', (e) => console.error('[WS] Error socket:', e.message));
+    socket.on('error', (e) => {
+        console.error('[WS] Error socket:', e.message);
+        // Remove from sets on error to prevent stale duplicates
+        grabadores.delete(socket);
+        displays.delete(socket);
+        try { socket.destroy(); } catch { }
+    });
 });
 
 // ─── Arrancar ─────────────────────────────────────────────────────────────────
