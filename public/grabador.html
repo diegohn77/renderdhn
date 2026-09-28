@@ -371,8 +371,7 @@
         let ws = null;
         let recognition = null;
         let isRecording = false;
-        let sessionFinalText = '';
-        let accumulatedText = '';
+        let finalTextStore = '';
 
         // ── DOM ──────────────────────────────────────────────────────────────────
         const recordBtn = document.getElementById('recordBtn');
@@ -414,6 +413,18 @@
             }
         }
 
+        function updatePreview(interim) {
+            const f = finalTextStore.trim();
+            const i = interim ? interim.trim() : '';
+            if (!f && !i) {
+                previewText.className = 'empty';
+                previewText.innerHTML = 'Presioná el botón para empezar a grabar';
+            } else {
+                previewText.className = '';
+                previewText.innerHTML = (f ? f + ' ' : '') + (i ? `<span class="interim">${i}</span>` : '');
+            }
+        }
+
         // ── Status helper ────────────────────────────────────────────────────────
         function setStatus(state, text) {
             statusBar.className = 'status-bar ' + (state === 'connected' ? 'connected' : state === 'recording' ? 'recording' : '');
@@ -429,38 +440,30 @@
             }
 
             recognition = new SpeechRecognition();
-            recognition.continuous = true;
+            recognition.continuous = false; // Auto-restart mode to prevent Android Chrome buffer duplication
             recognition.interimResults = true;
             recognition.lang = langSelect.value;
             recognition.maxAlternatives = 1;
 
             recognition.onresult = (e) => {
-                let currentFinal = '';
-                let currentInterim = '';
-
+                let interim = '';
                 for (let i = 0; i < e.results.length; i++) {
-                    const transcript = e.results[i][0].transcript;
-                    if (e.results[i].isFinal) {
-                        currentFinal += transcript + ' ';
+                    const result = e.results[i];
+                    const transcript = result[0].transcript;
+                    if (result.isFinal) {
+                        const phrase = transcript.trim();
+                        if (phrase) {
+                            finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + phrase;
+                        }
+                        sendTranscript(finalTextStore, '');
+                        updatePreview('');
+                        return;
                     } else {
-                        currentInterim += transcript;
+                        interim += transcript;
                     }
                 }
-
-                sessionFinalText = currentFinal;
-                const totalFinal = (accumulatedText + ' ' + sessionFinalText).trim();
-
-                sendTranscript(totalFinal, currentInterim);
-
-                // Update preview in grabador
-                if (!totalFinal && !currentInterim) {
-                    previewText.className = 'empty';
-                    previewText.innerHTML = 'Presioná el botón para empezar a grabar';
-                } else {
-                    previewText.className = '';
-                    previewText.innerHTML = (totalFinal ? totalFinal + ' ' : '') +
-                        (currentInterim ? `<span class="interim">${currentInterim}</span>` : '');
-                }
+                sendTranscript(finalTextStore, interim);
+                updatePreview(interim);
             };
 
             recognition.onerror = (e) => {
@@ -474,8 +477,6 @@
             };
 
             recognition.onend = () => {
-                accumulatedText = (accumulatedText + ' ' + sessionFinalText).trim();
-                sessionFinalText = '';
                 if (isRecording) {
                     try { recognition.start(); } catch { }
                 }
@@ -521,8 +522,7 @@
         });
 
         clearBtn.addEventListener('click', () => {
-            accumulatedText = '';
-            sessionFinalText = '';
+            finalTextStore = '';
             previewText.className = 'empty';
             previewText.innerHTML = 'Presioná el botón para empezar a grabar';
             if (ws && ws.readyState === WebSocket.OPEN) {
