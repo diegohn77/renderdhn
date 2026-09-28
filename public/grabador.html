@@ -471,7 +471,9 @@
                         }
                     } catch { /* ignore */ }
                 };
-                dg.onclose = () => { if (isRecording) { stopRecording().then(() => startRecording()); } };
+                dg.onclose = () => {
+                    console.log('[Deepgram] WebSocket cerrado');
+                };
             });
         }
 
@@ -511,14 +513,11 @@
 
         async function stopRecording() {
             isRecording = false;
+            currentInterim = '';
 
-            // Commit any uncommitted interim text so it is never lost on stop
-            if (currentInterim) {
-                finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + currentInterim;
-                currentInterim = '';
-                relayTranscript(finalTextStore, '');
-                updatePreview('');
-            }
+            // Cleanly finish preview without duplicating words
+            relayTranscript(finalTextStore, '');
+            updatePreview('');
 
             if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
             mediaRecorder = null;

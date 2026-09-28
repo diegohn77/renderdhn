@@ -185,10 +185,13 @@ server.on('upgrade', (req, socket) => {
         if (msg.role && !role) {
             role = msg.role;
             if (role === 'grabador') {
+                // Destroy any old grabador sockets so there is strictly ONLY 1 active grabador
+                for (const s of [...grabadores]) {
+                    try { s.destroy(); } catch { }
+                    grabadores.delete(s);
+                }
                 grabadores.add(socket);
-                // Purge dead sockets to keep accurate count
-                for (const s of [...grabadores]) { if (s.destroyed || !s.writable) grabadores.delete(s); }
-                console.log(`[WS] Grabador conectado (${grabadores.size} activo(s))`);
+                console.log(`[WS] Grabador conectado (1 activo)`);
                 broadcast(displays, { type: 'status', grabadores: grabadores.size });
             } else if (role === 'display') {
                 displays.add(socket);
