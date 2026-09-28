@@ -446,24 +446,23 @@
             recognition.maxAlternatives = 1;
 
             recognition.onresult = (e) => {
-                let interim = '';
-                for (let i = 0; i < e.results.length; i++) {
-                    const result = e.results[i];
-                    const transcript = result[0].transcript;
-                    if (result.isFinal) {
-                        const phrase = transcript.trim();
-                        if (phrase) {
-                            finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + phrase;
-                        }
-                        sendTranscript(finalTextStore, '');
-                        updatePreview('');
-                        return;
-                    } else {
-                        interim += transcript;
+                if (!e.results || e.results.length === 0) return;
+
+                // Chrome Android emits an array of hypothesis snapshots: [0]="Hola", [1]="Hola buen", [2]="Hola buen día".
+                // We MUST ONLY take the latest active item (the last element in e.results), never loop over all of them.
+                const lastResult = e.results[e.results.length - 1];
+                const transcript = lastResult[0].transcript.trim();
+
+                if (lastResult.isFinal) {
+                    if (transcript) {
+                        finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
                     }
+                    sendTranscript(finalTextStore, '');
+                    updatePreview('');
+                } else {
+                    sendTranscript(finalTextStore, transcript);
+                    updatePreview(transcript);
                 }
-                sendTranscript(finalTextStore, interim);
-                updatePreview(interim);
             };
 
             recognition.onerror = (e) => {
