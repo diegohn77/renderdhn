@@ -369,9 +369,14 @@
     <script>
         // ── State ────────────────────────────────────────────────────────────────
         let ws = null;
-        let recognition = null;
+        let dgWs = null;
+        let mediaRecorder = null;
+        let audioStream = null;
         let isRecording = false;
         let finalTextStore = '';
+
+        const DEEPGRAM_KEY = 'ff61b317da3b203ed27fe425774be623c2c103df';
+        const LANG_MAP = { 'es-AR': 'es', 'es-ES': 'es', 'en-US': 'en-US', 'pt-BR': 'pt-BR' };
 
         // ── DOM ──────────────────────────────────────────────────────────────────
         const recordBtn = document.getElementById('recordBtn');
@@ -383,161 +388,143 @@
         const errorMsg = document.getElementById('errorMsg');
         const langSelect = document.getElementById('langSelect');
 
-        // ── WebSocket ────────────────────────────────────────────────────────────
-        function connectWS() {
+        // ── Server WebSocket ──────────────────────────────────────────────────────
+        function connectServerWS() {
             const proto = location.protocol === 'https:' ? 'wss' : 'ws';
             ws = new WebSocket(`${proto}://${location.host}`);
-
             ws.onopen = () => {
                 ws.send(JSON.stringify({ role: 'grabador' }));
-                setStatus('connected', 'Conectado al servidor');
+                setStatus('connected', 'Conectado — listo para grabar');
                 recordBtn.disabled = false;
             };
-
             ws.onclose = () => {
                 setStatus('disconnected', 'Desconectado — reconectando…');
                 recordBtn.disabled = true;
-                setTimeout(connectWS, 3000);
+                setTimeout(connectServerWS, 3000);
             };
-
             ws.onerror = () => setStatus('disconnected', 'Error de conexión');
         }
 
-        function sendTranscript(finalText, interimText) {
+        function relayTranscript(finalText, interimText) {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'transcript',
-                    finalText: finalText ? finalText.trim() : '',
-                    interimText: interimText ? interimText.trim() : ''
-                }));
+                ws.send(JSON.stringify({ type: 'transcript', finalText: finalText || '', interimText: interimText || '' }));
             }
         }
 
+        // ── Preview ──────────────────────────────────────────────────────────────
         function updatePreview(interim) {
             const f = finalTextStore.trim();
-            const i = interim ? interim.trim() : '';
+            const i = (interim || '').trim();
             if (!f && !i) {
                 previewText.className = 'empty';
                 previewText.innerHTML = 'Presioná el botón para empezar a grabar';
             } else {
                 previewText.className = '';
-                previewText.innerHTML = (f ? f + ' ' : '') + (i ? `<span class="interim">${i}</span>` : '');
+                previewText.innerHTML = (f || '') + (f && i ? ' ' : '') + (i ? `<span class="interim">${i}</span>` : '');
             }
         }
 
-        // ── Status helper ────────────────────────────────────────────────────────
         function setStatus(state, text) {
             statusBar.className = 'status-bar ' + (state === 'connected' ? 'connected' : state === 'recording' ? 'recording' : '');
             statusText.textContent = text;
         }
 
-        // ── Speech Recognition ───────────────────────────────────────────────────
-        function setupRecognition() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                showError('Tu navegador no soporta reconocimiento de voz. Usá Chrome en Android.');
-                return false;
-            }
+        function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.add('visible'); }
 
-            recognition = new SpeechRecognition();
-            recognition.continuous = false; // Auto-restart mode to prevent Android Chrome buffer duplication
-            recognition.interimResults = true;
-            recognition.lang = langSelect.value;
-            recognition.maxAlternatives = 1;
-
-            recognition.onresult = (e) => {
-                if (!e.results || e.results.length === 0) return;
-
-                // Chrome Android emits an array of hypothesis snapshots: [0]="Hola", [1]="Hola buen", [2]="Hola buen día".
-                // We MUST ONLY take the latest active item (the last element in e.results), never loop over all of them.
-                const lastResult = e.results[e.results.length - 1];
-                const transcript = lastResult[0].transcript.trim();
-
-                if (lastResult.isFinal) {
-                    if (transcript) {
-                        finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
-                    }
-                    sendTranscript(finalTextStore, '');
-                    updatePreview('');
-                } else {
-                    sendTranscript(finalTextStore, transcript);
-                    updatePreview(transcript);
-                }
-            };
-
-            recognition.onerror = (e) => {
-                if (e.error === 'no-speech') return;
-                if (e.error === 'not-allowed') {
-                    showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
-                    stopRecording();
-                    return;
-                }
-                console.warn('SpeechRecognition error:', e.error);
-            };
-
-            recognition.onend = () => {
-                if (isRecording) {
-                    try { recognition.start(); } catch { }
-                }
-            };
-
-            return true;
+        // ── Deepgram ─────────────────────────────────────────────────────────────
+        function connectDeepgram(lang) {
+            return new Promise((resolve, reject) => {
+                const dgLang = LANG_MAP[lang] || 'es';
+                const url = `wss://api.deepgram.com/v1/listen?model=nova-2&language=${dgLang}&interim_results=true&punctuate=true&encoding=opus&sample_rate=48000&channels=1`;
+                const dg = new WebSocket(url, ['token', DEEPGRAM_KEY]);
+                dg.binaryType = 'arraybuffer';
+                dg.onopen = () => resolve(dg);
+                dg.onerror = (e) => reject(e);
+                dg.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type !== 'Results') return;
+                        const transcript = (data.channel?.alternatives?.[0]?.transcript || '').trim();
+                        if (!transcript) return;
+                        if (data.is_final) {
+                            finalTextStore = (finalTextStore ? finalTextStore + ' ' : '') + transcript;
+                            relayTranscript(finalTextStore, '');
+                            updatePreview('');
+                        } else {
+                            relayTranscript(finalTextStore, transcript);
+                            updatePreview(transcript);
+                        }
+                    } catch { /* ignore */ }
+                };
+                dg.onclose = () => { if (isRecording) { stopRecording().then(() => startRecording()); } };
+            });
         }
 
-        function startRecording() {
-            recognition.lang = langSelect.value;
-            recognition.start();
+        // ── Recording ────────────────────────────────────────────────────────────
+        async function startRecording() {
+            try {
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            } catch {
+                showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
+                return;
+            }
+            try {
+                dgWs = await connectDeepgram(langSelect.value);
+            } catch {
+                showError('No se pudo conectar a Deepgram. Verificá tu conexión.');
+                audioStream.getTracks().forEach(t => t.stop());
+                audioStream = null;
+                return;
+            }
+
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm');
+
+            mediaRecorder = new MediaRecorder(audioStream, { mimeType });
+            mediaRecorder.ondataavailable = (e) => {
+                if (dgWs && dgWs.readyState === WebSocket.OPEN && e.data.size > 0) dgWs.send(e.data);
+            };
+            mediaRecorder.start(250);
             isRecording = true;
             recordBtn.classList.add('recording');
             recordBtn.textContent = '⏹';
             waveform.classList.add('active');
-            setStatus('recording', 'Grabando…');
+            setStatus('recording', '🎙 Grabando con Deepgram…');
         }
 
-        function stopRecording() {
+        async function stopRecording() {
             isRecording = false;
-            try { recognition.stop(); } catch { }
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+            mediaRecorder = null;
+            if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+            if (dgWs) {
+                if (dgWs.readyState === WebSocket.OPEN) dgWs.send(JSON.stringify({ type: 'CloseStream' }));
+                dgWs.close();
+                dgWs = null;
+            }
             recordBtn.classList.remove('recording');
             recordBtn.textContent = '🎤';
             waveform.classList.remove('active');
-            setStatus('connected', 'Conectado al servidor');
-        }
-
-        function showError(msg) {
-            errorMsg.textContent = msg;
-            errorMsg.classList.add('visible');
+            setStatus('connected', 'Conectado — listo para grabar');
         }
 
         // ── Events ───────────────────────────────────────────────────────────────
-        recordBtn.addEventListener('click', () => {
-            if (!recognition) {
-                if (!setupRecognition()) return;
-            }
-            if (!isRecording) {
-                startRecording();
-            } else {
-                stopRecording();
-            }
+        recordBtn.addEventListener('click', async () => {
+            if (!isRecording) { await startRecording(); } else { await stopRecording(); }
         });
 
         clearBtn.addEventListener('click', () => {
             finalTextStore = '';
-            previewText.className = 'empty';
-            previewText.innerHTML = 'Presioná el botón para empezar a grabar';
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'clear' }));
-            }
+            updatePreview('');
+            if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'clear' }));
         });
 
-        langSelect.addEventListener('change', () => {
-            if (isRecording) {
-                stopRecording();
-                setTimeout(startRecording, 300);
-            }
+        langSelect.addEventListener('change', async () => {
+            if (isRecording) { await stopRecording(); setTimeout(startRecording, 300); }
         });
 
-        // ── Init ─────────────────────────────────────────────────────────────────
-        connectWS();
+        connectServerWS();
     </script>
 </body>
 
