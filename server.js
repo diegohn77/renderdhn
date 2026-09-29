@@ -59,11 +59,11 @@ function queryGroqAI(userPrompt) {
 
     const https = require('https');
     const postData = JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'qwen/qwen3.8-27b',
         messages: [
             {
                 role: 'system',
-                content: 'Eres un guía experto e historiador apacionado de la Capilla Sixtina en el Vaticano. Tu único ámbito de conocimiento es la Capilla Sixtina (su historia, los frescos de Miguel Ángel, el Juicio Final, la bóveda, la arquitectura, el cónclave papal, restauración, etc.). REGLA STRICTA INVIOLABLE: Si el usuario te pregunta sobre cualquier otro tema que NO esté directamente relacionado con la Capilla Sixtina (deportes, noticias, otros lugares no relacionados, tecnología, recetas, etc.), responde únicamente: "Lo siento, como guía especializado de la Capilla Sixtina solo puedo responder preguntas relacionadas con este monumento histórico." Sé claro, fascinante, educado y conciso (máximo 2 párrafos breves). Responde en español.'
+                content: 'Eres un guía experto e historiador apasionado de la Capilla Sixtina en el Vaticano. Tu único ámbito de conocimiento es la Capilla Sixtina (su historia, los frescos de Miguel Ángel, el Juicio Final, la bóveda, la arquitectura, el cónclave papal, restauración, etc.). REGLA STRICTA INVIOLABLE: Si el usuario te pregunta sobre cualquier otro tema que NO esté directamente relacionado con la Capilla Sixtina (deportes, noticias, otros lugares no relacionados, tecnología, recetas, etc.), responde únicamente: "Lo siento, como guía especializado de la Capilla Sixtina solo puedo responder preguntas relacionadas con este monumento histórico." Sé claro, fascinante, educado y conciso (máximo 2 párrafos breves). Responde siempre en español.'
             },
             {
                 role: 'user',
@@ -89,7 +89,34 @@ function queryGroqAI(userPrompt) {
         let buffer = '';
         let fullResponse = '';
 
+        if (res.statusCode !== 200) {
+            console.error(`[Groq AI] Error HTTP ${res.statusCode}`);
+            let errBody = '';
+            res.on('data', d => errBody += d);
+            res.on('end', () => {
+                console.error('[Groq AI] Detalles del error:', errBody);
+                broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error al consultar la IA. Intente nuevamente.' });
+            });
+            return;
+        }
+
         broadcast(displays, { type: 'AI_STREAM_START' });
+
+        const processLine = (line) => {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data: ')) return;
+            const jsonStr = trimmed.replace(/^data:\s*/, '');
+            if (jsonStr === '[DONE]') return;
+
+            try {
+                const parsed = JSON.parse(jsonStr);
+                const textChunk = parsed.choices?.[0]?.delta?.content || '';
+                if (textChunk) {
+                    fullResponse += textChunk;
+                    broadcast(displays, { type: 'AI_STREAM_CHUNK', chunk: textChunk });
+                }
+            } catch (e) { }
+        };
 
         res.on('data', (chunk) => {
             buffer += chunk.toString('utf8');
@@ -97,31 +124,20 @@ function queryGroqAI(userPrompt) {
             buffer = lines.pop(); // keep last incomplete line
 
             for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith('data: ')) continue;
-                const jsonStr = trimmed.replace(/^data:\s*/, '');
-                if (jsonStr === '[DONE]') continue;
-
-                try {
-                    const parsed = JSON.parse(jsonStr);
-                    const textChunk = parsed.choices?.[0]?.delta?.content || '';
-                    if (textChunk) {
-                        fullResponse += textChunk;
-                        broadcast(displays, { type: 'AI_STREAM_CHUNK', chunk: textChunk });
-                    }
-                } catch (e) { }
+                processLine(line);
             }
         });
 
         res.on('end', () => {
-            console.log('[Groq AI] Respuesta completada');
+            if (buffer.trim()) processLine(buffer);
+            console.log(`[Groq AI] Respuesta completada (${fullResponse.length} chars)`);
             broadcast(displays, { type: 'AI_STREAM_END', fullText: fullResponse });
         });
     });
 
     req.on('error', (err) => {
         console.error('[Groq AI] Error en llamada HTTPS:', err);
-        broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error al consultar a la IA.' });
+        broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error de conexión con la IA.' });
     });
 
     req.write(postData);
