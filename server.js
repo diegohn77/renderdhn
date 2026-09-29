@@ -36,6 +36,8 @@ const MIME = {
     '.json': 'application/json',
 };
 
+const DEEPGRAM_KEY = process.env.DEEPGRAM_KEY || 'ff61b317da3b203ed27fe425774be623c2c103df';
+
 // ─── HTTP Server ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
     const url = req.url.split('?')[0];
@@ -53,6 +55,73 @@ const server = http.createServer((req, res) => {
             localIP: LOCAL_IP,
             port: PORT,
         }));
+    }
+
+    // API: Transcripción por Bloque de Audio VAD
+    if (url === '/api/transcribe' && req.method === 'POST') {
+        let chunks = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+            const audioBuffer = Buffer.concat(chunks);
+            if (audioBuffer.length < 100) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'Audio buffer too small' }));
+            }
+
+            const https = require('https');
+            const lang = req.headers['x-language'] || 'es';
+            const options = {
+                hostname: 'api.deepgram.com',
+                path: `/v1/listen?model=nova-2&language=${lang}&smart_format=true&punctuate=true`,
+                method: 'POST',
+                headers: {
+                    'Authorization': `Token ${DEEPGRAM_KEY}`,
+                    'Content-Type': req.headers['content-type'] || 'audio/webm',
+                    'Content-Length': audioBuffer.length
+                }
+            };
+
+            const apiReq = https.request(options, (apiRes) => {
+                let responseBody = '';
+                apiRes.on('data', d => responseBody += d);
+                apiRes.on('end', () => {
+                    try {
+                        const data = JSON.parse(responseBody);
+                        const transcript = (data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '').trim();
+                        if (transcript) {
+                            // Append discrete sentence
+                            currentRoomState.finalText = currentRoomState.finalText
+                                ? currentRoomState.finalText + ' ' + transcript
+                                : transcript;
+                            currentRoomState.timestamp = Date.now();
+
+                            // Broadcast updated state to all displays
+                            broadcast(displays, {
+                                type: 'SYNC_STATE',
+                                finalText: currentRoomState.finalText,
+                                interimText: '',
+                                timestamp: currentRoomState.timestamp
+                            });
+                        }
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ text: transcript, fullText: currentRoomState.finalText }));
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: 'Parse error', details: e.message }));
+                    }
+                });
+            });
+
+            apiReq.on('error', (err) => {
+                console.error('[API] Error Deepgram REST:', err);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Deepgram REST error' }));
+            });
+
+            apiReq.write(audioBuffer);
+            apiReq.end();
+        });
+        return;
     }
 
     // Servir archivos estáticos

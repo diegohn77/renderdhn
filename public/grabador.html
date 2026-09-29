@@ -369,12 +369,18 @@
     <script>
         // ── State ────────────────────────────────────────────────────────────────
         let ws = null;
-        let recognition = null;
         let isRecording = false;
-        let finalPhrasesMap = {};
-        let currentInterim = '';
+        let audioContext = null;
+        let analyserNode = null;
+        let microphoneStream = null;
+        let mediaRecorder = null;
+        let chunkBlobs = [];
+        let silenceStart = 0;
+        let fullSessionText = '';
 
-        const LANG_MAP = { 'es-AR': 'es-AR', 'es-ES': 'es-ES', 'en-US': 'en-US', 'pt-BR': 'pt-BR' };
+        const SILENCE_THRESHOLD_RMS = 0.012; // Volume threshold for speech
+        const SILENCE_DURATION_MS = 600;     // Pause duration to trigger VAD send
+        const LANG_MAP = { 'es-AR': 'es', 'es-ES': 'es', 'en-US': 'en', 'pt-BR': 'pt' };
 
         // ── DOM ──────────────────────────────────────────────────────────────────
         const recordBtn = document.getElementById('recordBtn');
@@ -403,16 +409,6 @@
             ws.onerror = () => setStatus('disconnected', 'Error de conexión con el servidor');
         }
 
-        function sendSyncState(finalText, interimText) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'SYNC_STATE',
-                    finalText: finalText || '',
-                    interimText: interimText || ''
-                }));
-            }
-        }
-
         // ── Preview ──────────────────────────────────────────────────────────────
         function updatePreview(finalText, interimText) {
             const f = (finalText || '').trim();
@@ -433,109 +429,150 @@
 
         function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.add('visible'); }
 
-        // ── Recognition (Web Speech API + Idempotent State) ──────────────────────
-        function initRecognition() {
-            const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!Speech) {
-                showError('Tu navegador no soporta el reconocimiento de voz. Usá Google Chrome.');
-                return null;
+        // ── VAD Recording & Discrete Chunk Processing ────────────────────────────
+        async function startVADRecording() {
+            try {
+                microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            } catch {
+                showError('Permiso de micrófono denegado. Habilitalo en la configuración del navegador.');
+                return;
             }
-            const rec = new Speech();
-            rec.continuous = true;
-            rec.interimResults = true;
-            rec.lang = langSelect.value;
-
-            rec.onresult = (event) => {
-                currentInterim = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    const res = event.results[i];
-                    const transcript = res[0].transcript.trim();
-                    if (res.isFinal) {
-                        finalPhrasesMap[i] = transcript;
-                    } else {
-                        currentInterim = transcript;
-                    }
-                }
-
-                // Compute absolute ordered final text from map
-                const absoluteFinalText = Object.keys(finalPhrasesMap)
-                    .sort((a, b) => Number(a) - Number(b))
-                    .map(k => finalPhrasesMap[k])
-                    .filter(Boolean)
-                    .join(' ');
-
-                sendSyncState(absoluteFinalText, currentInterim);
-                updatePreview(absoluteFinalText, currentInterim);
-            };
-
-            rec.onerror = (e) => {
-                if (e.error === 'no-speech') return;
-                console.warn('[Speech] Error:', e.error);
-            };
-
-            rec.onend = () => {
-                if (isRecording && recognition) {
-                    try { recognition.start(); } catch { }
-                }
-            };
-
-            return rec;
-        }
-
-        // ── Recording Controls ───────────────────────────────────────────────────
-        function startRecording() {
-            if (!recognition) recognition = initRecognition();
-            if (!recognition) return;
 
             try {
-                recognition.lang = langSelect.value;
-                recognition.start();
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(microphoneStream);
+                analyserNode = audioContext.createAnalyser();
+                analyserNode.fftSize = 512;
+                source.connect(analyserNode);
+
                 isRecording = true;
                 recordBtn.classList.add('recording');
                 recordBtn.textContent = '⏹';
                 waveform.classList.add('active');
-                setStatus('recording', '🎙 Grabando… habla en voz alta');
+                setStatus('recording', '🎙 Grabando… habla y haz pausas naturales');
+
+                startAudioChunk();
+                monitorVolume();
             } catch (e) {
-                console.warn('[Speech] Error al iniciar:', e);
+                showError('Error al iniciar audio: ' + e.message);
             }
         }
 
-        function stopRecording() {
-            isRecording = false;
-            if (recognition) {
-                try { recognition.stop(); } catch { }
+        function startAudioChunk() {
+            if (!isRecording || !microphoneStream) return;
+            chunkBlobs = [];
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : 'audio/webm');
+
+            try {
+                mediaRecorder = new MediaRecorder(microphoneStream, { mimeType });
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) chunkBlobs.push(e.data);
+                };
+                mediaRecorder.start(100);
+            } catch (e) {
+                console.warn('[VAD] MediaRecorder start error:', e);
             }
+        }
+
+        function monitorVolume() {
+            if (!isRecording || !analyserNode) return;
+            const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+            analyserNode.getByteTimeDomainData(dataArray);
+
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                const norm = (dataArray[i] - 128) / 128;
+                sum += norm * norm;
+            }
+            const rms = Math.sqrt(sum / dataArray.length);
+
+            const now = Date.now();
+            if (rms < SILENCE_THRESHOLD_RMS) {
+                if (!silenceStart) silenceStart = now;
+                if (now - silenceStart > SILENCE_DURATION_MS && mediaRecorder && mediaRecorder.state === 'recording' && chunkBlobs.length > 0) {
+                    silenceStart = 0;
+                    finishAndSendChunk();
+                }
+            } else {
+                silenceStart = 0;
+            }
+
+            if (isRecording) requestAnimationFrame(monitorVolume);
+        }
+
+        async function finishAndSendChunk() {
+            if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+            mediaRecorder.stop();
+
+            setTimeout(async () => {
+                if (chunkBlobs.length === 0) {
+                    if (isRecording) startAudioChunk();
+                    return;
+                }
+                const audioBlob = new Blob(chunkBlobs, { type: 'audio/webm' });
+                if (isRecording) startAudioChunk();
+
+                if (audioBlob.size > 1200) { // process chunk if valid length
+                    try {
+                        const langCode = LANG_MAP[langSelect.value] || 'es';
+                        const res = await fetch('/api/transcribe', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'audio/webm',
+                                'x-language': langCode
+                            },
+                            body: audioBlob
+                        });
+                        const result = await res.json();
+                        if (result.fullText) {
+                            fullSessionText = result.fullText;
+                            updatePreview(fullSessionText, '');
+                        }
+                    } catch (e) {
+                        console.warn('[VAD] Error transcripción REST:', e);
+                    }
+                }
+            }, 60);
+        }
+
+        async function stopVADRecording() {
+            isRecording = false;
+            silenceStart = 0;
+
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                finishAndSendChunk();
+            }
+
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach(t => t.stop());
+                microphoneStream = null;
+            }
+            if (audioContext) {
+                try { audioContext.close(); } catch { }
+                audioContext = null;
+            }
+
             recordBtn.classList.remove('recording');
             recordBtn.textContent = '🎤';
             waveform.classList.remove('active');
             setStatus('connected', 'Conectado — listo para grabar');
-
-            // Send clean absolute state without interim
-            const absoluteFinalText = Object.keys(finalPhrasesMap)
-                .sort((a, b) => Number(a) - Number(b))
-                .map(k => finalPhrasesMap[k])
-                .filter(Boolean)
-                .join(' ');
-
-            sendSyncState(absoluteFinalText, '');
-            updatePreview(absoluteFinalText, '');
         }
 
         // ── Events ───────────────────────────────────────────────────────────────
-        recordBtn.addEventListener('click', () => {
-            if (!isRecording) { startRecording(); } else { stopRecording(); }
+        recordBtn.addEventListener('click', async () => {
+            if (!isRecording) { await startVADRecording(); } else { await stopVADRecording(); }
         });
 
         clearBtn.addEventListener('click', () => {
-            finalPhrasesMap = {};
-            currentInterim = '';
+            fullSessionText = '';
             updatePreview('', '');
             if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'clear' }));
         });
 
-        langSelect.addEventListener('change', () => {
-            if (recognition) recognition.lang = langSelect.value;
-            if (isRecording) { stopRecording(); setTimeout(startRecording, 300); }
+        langSelect.addEventListener('change', async () => {
+            if (isRecording) { await stopVADRecording(); setTimeout(startVADRecording, 300); }
         });
 
         connectServerWS();
