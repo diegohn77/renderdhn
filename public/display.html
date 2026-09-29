@@ -430,6 +430,7 @@
         let isMuted = false;
         let fullAIText = '';
         let spokenIndex = 0;
+        let lastPrompt = '';
 
         // ── Mute Button ──────────────────────────────────────────────────────────
         muteBtn.addEventListener('click', () => {
@@ -495,6 +496,16 @@
                 }
 
                 if (msg.type === 'SYNC_STATE' || msg.type === 'transcript') {
+                    // Reset previous AI answer box if text is updated
+                    if (msg.finalText && msg.finalText !== lastPrompt) {
+                        lastPrompt = msg.finalText;
+                        aiContainer.classList.remove('visible');
+                        aiText.textContent = '';
+                        fullAIText = '';
+                        spokenIndex = 0;
+                        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                    }
+
                     showTranscript(msg.finalText, msg.interimText);
                     liveBadge.classList.add('visible');
                     clearTimeout(liveBadge._timer);

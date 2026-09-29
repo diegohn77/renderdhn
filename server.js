@@ -53,9 +53,11 @@ function scheduleAIResponse() {
     }, 3000); // 3 seconds silence trigger
 }
 
-function queryGroqAI(userPrompt) {
-    console.log(`[Groq AI] Procesando prompt tras 3s de silencio: "${userPrompt}"`);
-    broadcast(displays, { type: 'AI_THINKING', prompt: userPrompt });
+function queryGroqAI(userPrompt, retryCount = 0) {
+    console.log(`[Groq AI] Procesando prompt tras 3s de silencio (intento ${retryCount + 1}): "${userPrompt}"`);
+    if (retryCount === 0) {
+        broadcast(displays, { type: 'AI_THINKING', prompt: userPrompt });
+    }
 
     const https = require('https');
     const postData = JSON.stringify({
@@ -90,12 +92,17 @@ function queryGroqAI(userPrompt) {
         let fullResponse = '';
 
         if (res.statusCode !== 200) {
-            console.error(`[Groq AI] Error HTTP ${res.statusCode}`);
+            console.error(`[Groq AI] Error HTTP ${res.statusCode} (Intento ${retryCount + 1})`);
             let errBody = '';
             res.on('data', d => errBody += d);
             res.on('end', () => {
                 console.error('[Groq AI] Detalles del error:', errBody);
-                broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error al consultar la IA. Intente nuevamente.' });
+                if (retryCount < 2) {
+                    console.log(`[Groq AI] Reintentando en 1s...`);
+                    setTimeout(() => queryGroqAI(userPrompt, retryCount + 1), 1000);
+                } else {
+                    broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error al consultar la IA. Por favor intente hacer la pregunta nuevamente.' });
+                }
             });
             return;
         }
@@ -121,7 +128,7 @@ function queryGroqAI(userPrompt) {
         res.on('data', (chunk) => {
             buffer += chunk.toString('utf8');
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // keep last incomplete line
+            buffer = lines.pop();
 
             for (const line of lines) {
                 processLine(line);
@@ -136,8 +143,12 @@ function queryGroqAI(userPrompt) {
     });
 
     req.on('error', (err) => {
-        console.error('[Groq AI] Error en llamada HTTPS:', err);
-        broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error de conexión con la IA.' });
+        console.error(`[Groq AI] Error en llamada HTTPS (Intento ${retryCount + 1}):`, err);
+        if (retryCount < 2) {
+            setTimeout(() => queryGroqAI(userPrompt, retryCount + 1), 1000);
+        } else {
+            broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error de conexión con la IA.' });
+        }
     });
 
     req.write(postData);
@@ -195,10 +206,8 @@ const server = http.createServer((req, res) => {
                         const data = JSON.parse(responseBody);
                         const transcript = (data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '').trim();
                         if (transcript) {
-                            // Append discrete sentence
-                            currentRoomState.finalText = currentRoomState.finalText
-                                ? currentRoomState.finalText + ' ' + transcript
-                                : transcript;
+                            // Replace previous transcript so new audio inputs don't accumulate
+                            currentRoomState.finalText = transcript;
                             currentRoomState.timestamp = Date.now();
 
                             // Broadcast updated state to all displays
