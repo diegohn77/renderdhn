@@ -95,7 +95,23 @@
             animation: blink 1s infinite;
         }
 
-        /* ── Mute Button ────────────────────────────── */
+        /* ── Mute Button & Audio Notice ─────────────────────────── */
+        .audio-notice {
+            background: linear-gradient(135deg, rgba(108, 99, 255, 0.35), rgba(167, 139, 250, 0.25));
+            border-bottom: 1px solid rgba(167, 139, 250, 0.5);
+            color: #f0f0ff;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .audio-notice:hover {
+            background: linear-gradient(135deg, rgba(108, 99, 255, 0.5), rgba(167, 139, 250, 0.35));
+        }
+
         .mute-btn {
             background: rgba(108, 99, 255, 0.15);
             border: 1px solid rgba(108, 99, 255, 0.4);
@@ -382,6 +398,11 @@
         </div>
     </div>
 
+    <div class="audio-notice" id="audioNotice" onclick="unlockAudio()">
+        🔊 Tocá o hacé clic en cualquier parte de la pantalla para asegurar que se escuche el audio (Voz
+        Latinoamericana)
+    </div>
+
     <div class="stage">
         <div class="transcript-container">
             <div class="empty-state" id="emptyState">
@@ -449,21 +470,105 @@
             }
         });
 
-        // ── Text To Speech (TTS) ─────────────────────────────────────────────────
+        // ── Text To Speech (TTS Español Latino) ─────────────────────────
+        let audioUnlocked = false;
+        let cachedLatinVoice = null;
+
+        function unlockAudio() {
+            if (audioUnlocked) return;
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.resume();
+                const silent = new SpeechSynthesisUtterance('');
+                silent.volume = 0;
+                window.speechSynthesis.speak(silent);
+                audioUnlocked = true;
+                const notice = document.getElementById('audioNotice');
+                if (notice) notice.style.display = 'none';
+                console.log('[TTS] Audio sintetizador desbloqueado');
+            }
+        }
+
+        window.addEventListener('click', unlockAudio);
+        window.addEventListener('touchstart', unlockAudio);
+        window.addEventListener('keydown', unlockAudio);
+
+        function getLatinSpanishVoice() {
+            if (cachedLatinVoice) return cachedLatinVoice;
+            if (!('speechSynthesis' in window)) return null;
+
+            const voices = window.speechSynthesis.getVoices();
+            if (!voices || voices.length === 0) return null;
+
+            // 1. Prefer explicit Latin American locales (es-MX, es-419, es-US, es-AR, es-CO, es-CL, es-PE)
+            const latAmLocales = ['es-MX', 'es-419', 'es-US', 'es-AR', 'es-CO', 'es-CL', 'es-PE', 'es-VE'];
+            for (const loc of latAmLocales) {
+                const match = voices.find(v => v.lang.replace('_', '-').toLowerCase() === loc.toLowerCase());
+                if (match) {
+                    cachedLatinVoice = match;
+                    console.log('[TTS] Voz latina encontrada por locale:', match.name, match.lang);
+                    return match;
+                }
+            }
+
+            // 2. Check for Latin American keywords in voice names
+            const latKeywords = ['mexico', 'latin', 'argentina', 'colombia', 'chile', 'peru', 'united states', 'sabrina', 'lupe', 'paulina', 'dalia', 'jorge', 'raul', 'miguel', 'carlos', 'sofia'];
+            const nameMatch = voices.find(v => {
+                const name = v.name.toLowerCase();
+                const lang = v.lang.toLowerCase();
+                return lang.startsWith('es') && latKeywords.some(k => name.includes(k));
+            });
+            if (nameMatch) {
+                cachedLatinVoice = nameMatch;
+                console.log('[TTS] Voz latina encontrada por nombre:', nameMatch.name, nameMatch.lang);
+                return nameMatch;
+            }
+
+            // 3. Fallback to any Spanish non-es-ES voice
+            const nonEsEs = voices.find(v => v.lang.startsWith('es') && !v.lang.toUpperCase().includes('ES-ES'));
+            if (nonEsEs) {
+                cachedLatinVoice = nonEsEs;
+                return nonEsEs;
+            }
+
+            // 4. Fallback to any Spanish voice
+            const anyEs = voices.find(v => v.lang.startsWith('es'));
+            if (anyEs) {
+                cachedLatinVoice = anyEs;
+                return anyEs;
+            }
+
+            return null;
+        }
+
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                cachedLatinVoice = null;
+                getLatinSpanishVoice();
+            };
+        }
+
         function speakText(text) {
             if (isMuted || !('speechSynthesis' in window)) return;
             const cleanText = text.trim();
             if (!cleanText) return;
 
+            // Ensure speech synthesis is resumed if browser paused it
+            if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+            }
+
             const utterance = new SpeechSynthesisUtterance(cleanText);
-            utterance.lang = 'es-ES';
+            const voice = getLatinSpanishVoice();
+
+            if (voice) {
+                utterance.voice = voice;
+                utterance.lang = voice.lang;
+            } else {
+                utterance.lang = 'es-MX';
+            }
+
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
-
-            // Try selecting a good Spanish voice
-            const voices = window.speechSynthesis.getVoices();
-            const esVoice = voices.find(v => v.lang.startsWith('es'));
-            if (esVoice) utterance.voice = esVoice;
 
             window.speechSynthesis.speak(utterance);
         }
