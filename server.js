@@ -37,6 +37,96 @@ const MIME = {
 };
 
 const DEEPGRAM_KEY = process.env.DEEPGRAM_KEY || 'ff61b317da3b203ed27fe425774be623c2c103df';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || ['gsk_PEtW9Cfgo6k2Q9', 'kohTKTWGdyb3FYKp', 'MvJhnoKDOwF4UttAQjuoyt'].join('');
+
+let aiTimer = null;
+let lastProcessedPrompt = '';
+
+function scheduleAIResponse() {
+    clearTimeout(aiTimer);
+    aiTimer = setTimeout(() => {
+        const textToProcess = (currentRoomState.finalText || '').trim();
+        if (textToProcess && textToProcess !== lastProcessedPrompt) {
+            lastProcessedPrompt = textToProcess;
+            queryGroqAI(textToProcess);
+        }
+    }, 3000); // 3 seconds silence trigger
+}
+
+function queryGroqAI(userPrompt) {
+    console.log(`[Groq AI] Procesando prompt tras 3s de silencio: "${userPrompt}"`);
+    broadcast(displays, { type: 'AI_THINKING', prompt: userPrompt });
+
+    const https = require('https');
+    const postData = JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+            {
+                role: 'system',
+                content: 'Eres un guía experto e historiador apacionado de la Capilla Sixtina en el Vaticano. Tu único ámbito de conocimiento es la Capilla Sixtina (su historia, los frescos de Miguel Ángel, el Juicio Final, la bóveda, la arquitectura, el cónclave papal, restauración, etc.). REGLA STRICTA INVIOLABLE: Si el usuario te pregunta sobre cualquier otro tema que NO esté directamente relacionado con la Capilla Sixtina (deportes, noticias, otros lugares no relacionados, tecnología, recetas, etc.), responde únicamente: "Lo siento, como guía especializado de la Capilla Sixtina solo puedo responder preguntas relacionadas con este monumento histórico." Sé claro, fascinante, educado y conciso (máximo 2 párrafos breves). Responde en español.'
+            },
+            {
+                role: 'user',
+                content: userPrompt
+            }
+        ],
+        stream: true,
+        temperature: 0.4
+    });
+
+    const options = {
+        hostname: 'api.groq.com',
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData)
+        }
+    };
+
+    const req = https.request(options, (res) => {
+        let buffer = '';
+        let fullResponse = '';
+
+        broadcast(displays, { type: 'AI_STREAM_START' });
+
+        res.on('data', (chunk) => {
+            buffer += chunk.toString('utf8');
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep last incomplete line
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || !trimmed.startsWith('data: ')) continue;
+                const jsonStr = trimmed.replace(/^data:\s*/, '');
+                if (jsonStr === '[DONE]') continue;
+
+                try {
+                    const parsed = JSON.parse(jsonStr);
+                    const textChunk = parsed.choices?.[0]?.delta?.content || '';
+                    if (textChunk) {
+                        fullResponse += textChunk;
+                        broadcast(displays, { type: 'AI_STREAM_CHUNK', chunk: textChunk });
+                    }
+                } catch (e) { }
+            }
+        });
+
+        res.on('end', () => {
+            console.log('[Groq AI] Respuesta completada');
+            broadcast(displays, { type: 'AI_STREAM_END', fullText: fullResponse });
+        });
+    });
+
+    req.on('error', (err) => {
+        console.error('[Groq AI] Error en llamada HTTPS:', err);
+        broadcast(displays, { type: 'AI_STREAM_END', fullText: 'Error al consultar a la IA.' });
+    });
+
+    req.write(postData);
+    req.end();
+}
 
 // ─── HTTP Server ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
@@ -102,6 +192,9 @@ const server = http.createServer((req, res) => {
                                 interimText: '',
                                 timestamp: currentRoomState.timestamp
                             });
+
+                            // Schedule AI query after 3 seconds of silence
+                            scheduleAIResponse();
                         }
                         res.writeHead(200, { 'Content-Type': 'application/json' });
                         res.end(JSON.stringify({ text: transcript, fullText: currentRoomState.finalText }));
@@ -295,10 +388,14 @@ server.on('upgrade', (req, socket) => {
                     interimText: currentRoomState.interimText,
                     timestamp: currentRoomState.timestamp
                 });
+                scheduleAIResponse();
             }
             if (msg.type === 'clear') {
+                clearTimeout(aiTimer);
+                lastProcessedPrompt = '';
                 currentRoomState = { finalText: '', interimText: '', timestamp: Date.now() };
                 broadcast(displays, { type: 'SYNC_STATE', finalText: '', interimText: '', timestamp: Date.now() });
+                broadcast(displays, { type: 'AI_STREAM_END', fullText: '' });
             }
         }
     });

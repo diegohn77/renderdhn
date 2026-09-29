@@ -93,6 +93,97 @@
             animation: blink 1s infinite;
         }
 
+        /* ── Mute Button ────────────────────────────── */
+        .mute-btn {
+            background: rgba(108, 99, 255, 0.15);
+            border: 1px solid rgba(108, 99, 255, 0.4);
+            color: #f0f0ff;
+            padding: 0.4rem 0.9rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .mute-btn:hover {
+            background: rgba(108, 99, 255, 0.3);
+            border-color: var(--accent2);
+        }
+
+        .mute-btn.muted {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+        }
+
+        /* ── AI Response Box ──────────────────────── */
+        .ai-container {
+            max-width: 900px;
+            width: 100%;
+            margin-top: 2rem;
+            background: rgba(15, 15, 30, 0.7);
+            border: 1px solid rgba(167, 139, 250, 0.25);
+            border-radius: 16px;
+            padding: 1.5rem 2rem;
+            backdrop-filter: blur(12px);
+            text-align: left;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.4s ease;
+        }
+
+        .ai-container.visible {
+            display: block;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .ai-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .ai-badge {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--accent2);
+            letter-spacing: 0.03em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ai-status {
+            font-size: 0.75rem;
+            color: #fbbf24;
+            font-style: italic;
+        }
+
+        .ai-text {
+            font-size: clamp(1.1rem, 2.2vw, 1.4rem);
+            line-height: 1.6;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+        }
+
         @keyframes blink {
 
             0%,
@@ -255,8 +346,11 @@
 <body>
 
     <div class="topbar">
-        <div class="logo">⚡ ConversacionIA</div>
+        <div class="logo">⚡ ConversacionIA <span
+                style="font-size:0.7em; opacity:0.6; margin-left:8px; font-weight:normal;">Guía Capilla Sixtina</span>
+        </div>
         <div class="indicators">
+            <button class="mute-btn" id="muteBtn" title="Activar/Desactivar Voz de la IA">🔊 Voz activada</button>
             <div class="indicator" id="wsIndicator">
                 <div class="dot"></div>
                 <span id="wsLabel">Conectando…</span>
@@ -271,13 +365,21 @@
     <div class="stage">
         <div class="transcript-container">
             <div class="empty-state" id="emptyState">
-                <div class="empty-icon">🎙️</div>
-                <p>Esperando al grabador…</p>
+                <div class="empty-icon">🏛️</div>
+                <p>Esperando la pregunta del grabador sobre la Capilla Sixtina…</p>
             </div>
 
             <div class="transcript-text" id="transcriptText">
                 <span class="final-part" id="finalPart"></span><span class="interim-part" id="interimPart"></span><span
                     class="cursor" id="cursor"></span>
+            </div>
+
+            <div class="ai-container" id="aiContainer">
+                <div class="ai-header">
+                    <span class="ai-badge">🤖 Guía Capilla Sixtina</span>
+                    <span class="ai-status" id="aiStatus">Pensando…</span>
+                </div>
+                <div class="ai-text" id="aiText"></div>
             </div>
         </div>
     </div>
@@ -299,8 +401,51 @@
         const cursor = document.getElementById('cursor');
         const liveBadge = document.getElementById('liveBadge');
 
+        const aiContainer = document.getElementById('aiContainer');
+        const aiStatus = document.getElementById('aiStatus');
+        const aiText = document.getElementById('aiText');
+        const muteBtn = document.getElementById('muteBtn');
+
         let hasContent = false;
-        let finalTextStore = '';
+        let isMuted = false;
+        let fullAIText = '';
+        let spokenIndex = 0;
+
+        // ── Mute Button ──────────────────────────────────────────────────────────
+        muteBtn.addEventListener('click', () => {
+            isMuted = !isMuted;
+            if (isMuted) {
+                muteBtn.classList.add('muted');
+                muteBtn.innerHTML = '🔇 Voz silenciada';
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+            } else {
+                muteBtn.classList.remove('muted');
+                muteBtn.innerHTML = '🔊 Voz activada';
+                // Speak remaining text if any
+                if (fullAIText && spokenIndex < fullAIText.length) {
+                    speakText(fullAIText.substring(spokenIndex));
+                }
+            }
+        });
+
+        // ── Text To Speech (TTS) ─────────────────────────────────────────────────
+        function speakText(text) {
+            if (isMuted || !('speechSynthesis' in window)) return;
+            const cleanText = text.trim();
+            if (!cleanText) return;
+
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = 'es-ES';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            // Try selecting a good Spanish voice
+            const voices = window.speechSynthesis.getVoices();
+            const esVoice = voices.find(v => v.lang.startsWith('es'));
+            if (esVoice) utterance.voice = esVoice;
+
+            window.speechSynthesis.speak(utterance);
+        }
 
         // ── WebSocket ────────────────────────────────────────────────────────────
         function connectWS() {
@@ -338,6 +483,52 @@
                     grabIndicator.className = 'indicator grabando';
                     grabLabel.textContent = 'En vivo…';
                     cursor.className = 'cursor visible';
+                }
+
+                // ── AI Events ──
+                if (msg.type === 'AI_THINKING') {
+                    aiContainer.classList.add('visible');
+                    aiStatus.textContent = 'Pensando respuesta (Capilla Sixtina)…';
+                    aiText.textContent = '';
+                    fullAIText = '';
+                    spokenIndex = 0;
+                    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+                }
+
+                if (msg.type === 'AI_STREAM_START') {
+                    aiContainer.classList.add('visible');
+                    aiStatus.textContent = 'Respondiendo…';
+                    aiText.textContent = '';
+                    fullAIText = '';
+                    spokenIndex = 0;
+                }
+
+                if (msg.type === 'AI_STREAM_CHUNK') {
+                    aiContainer.classList.add('visible');
+                    fullAIText += msg.chunk;
+                    aiText.textContent = fullAIText;
+
+                    // Speak sentence by sentence
+                    const unSpoken = fullAIText.substring(spokenIndex);
+                    const sentenceMatch = unSpoken.match(/^.*?[.?!]\s/);
+                    if (sentenceMatch) {
+                        const sentenceToSpeak = sentenceMatch[0];
+                        spokenIndex += sentenceToSpeak.length;
+                        speakText(sentenceToSpeak);
+                    }
+                }
+
+                if (msg.type === 'AI_STREAM_END') {
+                    aiStatus.textContent = 'Respuesta completada ✓';
+                    if (msg.fullText) fullAIText = msg.fullText;
+                    aiText.textContent = fullAIText;
+
+                    // Speak remaining text at the end
+                    if (spokenIndex < fullAIText.length) {
+                        const remaining = fullAIText.substring(spokenIndex);
+                        spokenIndex = fullAIText.length;
+                        speakText(remaining);
+                    }
                 }
 
                 if (msg.type === 'clear') {
