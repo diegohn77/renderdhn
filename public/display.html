@@ -32,10 +32,12 @@
             font-family: 'Inter', sans-serif;
             background: var(--bg);
             color: var(--text-final);
-            height: 100vh;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
+            scroll-behavior: smooth;
             background-image:
                 radial-gradient(ellipse 80% 60% at 50% -10%, rgba(108, 99, 255, 0.10) 0%, transparent 70%),
                 radial-gradient(ellipse 50% 40% at 90% 90%, rgba(167, 139, 250, 0.05) 0%, transparent 60%);
@@ -124,16 +126,29 @@
         .ai-container {
             max-width: 900px;
             width: 100%;
-            margin-top: 2rem;
-            background: rgba(15, 15, 30, 0.7);
-            border: 1px solid rgba(167, 139, 250, 0.25);
+            max-height: 55vh;
+            overflow-y: auto;
+            margin-top: 1.5rem;
+            background: rgba(15, 15, 30, 0.85);
+            border: 1px solid rgba(167, 139, 250, 0.35);
             border-radius: 16px;
-            padding: 1.5rem 2rem;
+            padding: 1.25rem 1.75rem;
             backdrop-filter: blur(12px);
             text-align: left;
             display: none;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
             animation: slideUp 0.4s ease;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(167, 139, 250, 0.4) transparent;
+        }
+
+        .ai-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .ai-container::-webkit-scrollbar-thumb {
+            background: rgba(167, 139, 250, 0.4);
+            border-radius: 10px;
         }
 
         .ai-container.visible {
@@ -156,9 +171,13 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 1rem;
-            padding-bottom: 0.6rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: sticky;
+            top: 0;
+            background: rgba(15, 15, 30, 0.95);
+            z-index: 2;
         }
 
         .ai-badge {
@@ -178,8 +197,8 @@
         }
 
         .ai-text {
-            font-size: clamp(1.1rem, 2.2vw, 1.4rem);
-            line-height: 1.6;
+            font-size: clamp(1rem, 1.8vw, 1.25rem);
+            line-height: 1.65;
             color: #e2e8f0;
             white-space: pre-wrap;
         }
@@ -202,8 +221,8 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 3rem 6vw;
+            justify-content: flex-start;
+            padding: 2rem 5vw 7rem 5vw;
             position: relative;
         }
 
@@ -221,11 +240,11 @@
             gap: 1.5rem;
             opacity: 0.4;
             transition: opacity 0.5s;
+            margin-top: 10vh;
         }
 
         .empty-state.hidden {
-            opacity: 0;
-            pointer-events: none;
+            display: none;
         }
 
         .empty-icon {
@@ -239,11 +258,12 @@
 
         /* Text display */
         .transcript-text {
-            font-size: clamp(1.6rem, 4vw, 3rem);
+            font-size: clamp(1.3rem, 2.8vw, 2.2rem);
             font-weight: 500;
-            line-height: 1.55;
+            line-height: 1.5;
             letter-spacing: -0.01em;
             display: none;
+            margin-bottom: 1rem;
         }
 
         .transcript-text.visible {
@@ -507,6 +527,8 @@
                     aiContainer.classList.add('visible');
                     fullAIText += msg.chunk;
                     aiText.textContent = fullAIText;
+                    aiContainer.scrollTop = aiContainer.scrollHeight;
+                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
                     // Speak sentence by sentence
                     const unSpoken = fullAIText.substring(spokenIndex);
@@ -522,6 +544,8 @@
                     aiStatus.textContent = 'Respuesta completada ✓';
                     if (msg.fullText) fullAIText = msg.fullText;
                     aiText.textContent = fullAIText;
+                    aiContainer.scrollTop = aiContainer.scrollHeight;
+                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
                     // Speak remaining text at the end
                     if (spokenIndex < fullAIText.length) {
